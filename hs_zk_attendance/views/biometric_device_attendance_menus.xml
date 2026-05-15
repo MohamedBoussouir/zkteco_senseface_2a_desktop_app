@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <!--    Defined all menus here -->
+    <!-- Top Level Menu -->
+    <menuitem id="biometric_device_details_menu"
+              name="Biometric Device"
+              web_icon="hs_zk_attendance,static/description/icon.png"
+              sequence="50"/>
+
+    <!-- Device Configuration -->
+    <menuitem id="biometric_device_details_sub_menu"
+              name="Device Configuration"
+              action="biometric_device_details_action"
+              parent="biometric_device_details_menu"
+              sequence="10"/>
+
+    <!-- Device Users -->
+    <menuitem id="biometric_device_user_menu"
+              name="Device Users"
+              action="action_biometric_device_user"
+              parent="biometric_device_details_menu"
+              sequence="15"/>
+
+    <!-- Biometric Logs -->
+    <menuitem id="daily_attendance_menu"
+              name="Biometric Logs"
+              action="daily_attendance_action"
+              parent="biometric_device_details_menu"
+              sequence="20"
+              groups="hr_attendance.group_hr_attendance_officer"/>
+
+    <!-- Attendances (Paired) -->
+    <menuitem id="zk_machine_attendance_menu"
+              name="Attendances"
+              action="hr_attendance.hr_attendance_action"
+              parent="biometric_device_details_menu"
+              sequence="25"/>
+</odoo>

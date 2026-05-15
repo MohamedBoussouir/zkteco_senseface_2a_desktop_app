@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HS ZK Attendance - Premium Pro</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="logo">
+            <i class="fas fa-fingerprint"></i>
+            <span>HS ATTENDANCE</span>
+        </div>
+        
+        <nav class="sidebar-nav">
+            <a href="#" class="nav-item active" data-page="dashboard">
+                <i class="fas fa-th-large"></i> Dashboard
+            </a>
+            <a href="#" class="nav-item" data-page="users">
+                <i class="fas fa-user-group"></i> Manage Users
+            </a>
+            <a href="#" class="nav-item" data-page="logs">
+                <i class="fas fa-history"></i> Attendance Logs
+            </a>
+            <a href="#" class="nav-item" data-page="devices">
+                <i class="fas fa-microchip"></i> Manage Devices
+            </a>
+            <a href="#" class="nav-item" data-page="reports">
+                <i class="fas fa-file-invoice"></i> Late Reports
+            </a>
+            <a href="#" class="nav-item" data-page="settings">
+                <i class="fas fa-cog"></i> Settings
+            </a>
+            <a href="#" class="nav-item" data-page="playground">
+                <i class="fas fa-terminal"></i> Debug Center
+            </a>
+        </nav>
+
+        <div class="sidebar-footer">
+            <button class="btn btn-red btn-full" id="emergency-stop-btn">
+                <i class="fas fa-stop-circle"></i> Emergency Stop
+            </button>
+            <div style="margin-top: 15px; font-size: 0.75rem; color: var(--text-muted); display: flex; align-items: center; gap: 8px;">
+                <div id="active-device-status" class="status-indicator online" style="width:8px; height:8px; border-radius:50%"></div>
+                <span id="global-status">System Ready</span>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main>
+        <header>
+            <div>
+                <h1 id="page-title">Dashboard</h1>
+                <p id="page-subtitle">Welcome back, manager.</p>
+            </div>
+            <div class="header-actions">
+                <button class="btn btn-primary" id="sync-all-btn">
+                    <i class="fas fa-sync-alt"></i> Sync All Devices
+                </button>
+            </div>
+        </header>
+
+        <!-- Dashboard Page -->
+        <div id="dashboard-page" class="page active">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="icon-box blue"><i class="fas fa-users"></i></div>
+                    <div class="stat-info">
+                        <h3>Today's Punches</h3>
+                        <p id="today-punches">0</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="icon-box green"><i class="fas fa-clock-rotate-left"></i></div>
+                    <div class="stat-info">
+                        <h3>Last Sync</h3>
+                        <p id="last-sync-time">Never</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="icon-box blue"><i class="fas fa-signal"></i></div>
+                    <div class="stat-info" onclick="app.updateGlobalStatus()" style="cursor:pointer">
+                        <h3>System Status</h3>
+                        <p id="device-status-text" style="font-size: 1.1rem; color: var(--success)">Checking...</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="chart-container-card">
+                <div class="section-header">
+                    <h2>Attendance Trend</h2>
+                    <span style="font-size: 0.8rem; color: var(--text-muted)">Last 7 Days</span>
+                </div>
+                <div style="height: 300px;">
+                    <canvas id="attendanceChart"></canvas>
+                </div>
+            </div>
+
+            <div class="recent-logs">
+                <div class="section-header">
+                    <h2>Recent Activity</h2>
+                    <button class="btn btn-secondary btn-sm" onclick="app.showPage('logs')">View All</button>
+                </div>
+                <div class="table-container">
+                    <table id="recent-table">
+                        <thead>
+                            <tr>
+                                <th>Employee</th>
+                                <th>ID</th>
+                                <th>Time</th>
+                                <th>Device</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Data injection -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Manage Users Page -->
+        <div id="users-page" class="page">
+            <div class="stats-grid">
+                <div class="card" style="grid-column: span 1;">
+                    <div class="section-header">
+                        <h2><i class="fas fa-user-plus"></i> Add New Employee</h2>
+                    </div>
+                    <form id="add-user-form">
+                        <div class="form-group">
+                            <label>Full Name</label>
+                            <input type="text" id="user-name" placeholder="John Doe" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Hardware ID (UID)</label>
+                            <input type="number" id="user-id" placeholder="101" required>
+                        </div>
+                        <div class="playground-controls" style="margin-bottom:20px">
+                            <div class="form-group">
+                                <label>Target Device</label>
+                                <select id="user-target-device"></select>
+                            </div>
+                            <div class="form-group">
+                                <label>Role</label>
+                                <select id="user-role">
+                                    <option value="0">Regular User</option>
+                                    <option value="14">Administrator</option>
+                                </select>
+                            </div>
+                        </div>
+                        <input type="hidden" id="user-password" value="">
+                        <div style="display:flex; gap:10px">
+                            <button type="submit" class="btn btn-primary flex-1" id="user-submit-btn">Create User on Device</button>
+                            <button type="button" class="btn btn-outline" id="user-cancel-btn" style="display:none" onclick="app.resetUserForm()">Cancel</button>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="card" style="grid-column: span 2;">
+                    <div class="section-header">
+                        <h2><i class="fas fa-users"></i> Employee Directory</h2>
+                        <div style="display:flex; gap:10px">
+                            <input type="text" id="users-search" placeholder="Search..." style="width:150px">
+                            <button class="btn btn-secondary" onclick="app.syncAllUsers()"><i class="fas fa-download"></i> Fetch All</button>
+                            <button class="btn btn-secondary" onclick="app.syncAllBio()"><i class="fas fa-fingerprint"></i> Sync Bio</button>
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table id="users-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>ID</th>
+                                    <th>Bio</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Data injection -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Attendance Logs Page -->
+        <div id="logs-page" class="page">
+            <div class="card">
+                <div class="section-header">
+                    <h2><i class="fas fa-history"></i> Attendance Records</h2>
+                </div>
+                <div class="table-container">
+                    <table id="logs-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>User ID</th>
+                                <th>Timestamp</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Data injection -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Manage Devices Page -->
+        <div id="devices-page" class="page">
+            <div class="stats-grid">
+                <div class="card">
+                    <div class="section-header">
+                        <h2>Add New Terminal</h2>
+                    </div>
+                    <div class="form-group">
+                        <label>Display Name</label>
+                        <input type="text" id="device-name" placeholder="Front Entrance">
+                    </div>
+                    <div class="form-group">
+                        <label>IP Address</label>
+                        <input type="text" id="device-ip" placeholder="192.168.0.157">
+                    </div>
+                    <div class="playground-controls">
+                        <div class="form-group">
+                            <label>Port 1</label>
+                            <input type="number" id="device-port1" value="4370">
+                        </div>
+                        <div class="form-group">
+                            <label>Port 2</label>
+                            <input type="number" id="device-port2" value="4371">
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:10px; margin-top:20px">
+                        <button class="btn btn-secondary" onclick="app.testConn(document.getElementById('device-ip').value, [4370, 4371])">Test Ping</button>
+                        <button class="btn btn-primary flex-1" onclick="app.addDevice()">Save Device</button>
+                    </div>
+                </div>
+                <div class="card" style="grid-column: span 2;">
+                    <div class="section-header">
+                        <h2>Connected Terminals</h2>
+                    </div>
+                    <div id="devices-grid" class="stats-grid" style="grid-template-columns: 1fr 1fr; gap: 15px;">
+                        <!-- Device cards injected here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Late Reports Page -->
+        <div id="reports-page" class="page">
+            <div class="stats-grid">
+                <div class="card">
+                    <div class="section-header"><h2><i class="fas fa-clock"></i> Shift Settings</h2></div>
+                    <div class="form-group">
+                        <label>Work Start Time</label>
+                        <input type="time" id="report-start-time" value="08:00">
+                    </div>
+                    <div class="form-group">
+                        <label>Work End Time</label>
+                        <input type="time" id="report-end-time" value="17:00">
+                    </div>
+                    <div class="form-group">
+                        <label>Report Date</label>
+                        <div style="display:flex; gap:10px">
+                            <input type="date" id="report-date">
+                            <button class="btn btn-secondary" onclick="app.setReportToday()">Today</button>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary btn-full" onclick="app.generateLateReport()">
+                        <i class="fas fa-search"></i> Generate Report
+                    </button>
+                </div>
+
+                <div class="card" style="grid-column: span 2;">
+                    <div class="section-header">
+                        <h2>Lateness Summary</h2>
+                    </div>
+                    <div class="table-container">
+                        <table id="late-report-table">
+                            <thead>
+                                <tr>
+                                    <th>Employee</th>
+                                    <th>First Punch</th>
+                                    <th>Last Punch</th>
+                                    <th>Expected</th>
+                                    <th>Delay</th>
+                                    <th>Work Hrs</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Data injection -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Page -->
+        <div id="settings-page" class="page">
+            <div class="stats-grid">
+                <div class="card">
+                    <div class="section-header">
+                        <h2><i class="fas fa-clock"></i> Device Time Settings</h2>
+                    </div>
+                    <p class="text-slate-400 mb-4">Synchronize all biometric devices with the current computer time to ensure accurate logs.</p>
+                    <button class="btn btn-primary btn-full mb-2" onclick="app.syncAllClocks()">
+                        <i class="fas fa-sync-alt"></i> Sync All Devices Time
+                    </button>
+                    <button class="btn btn-outline btn-full" onclick="app.rebootAllDevices()">
+                        <i class="fas fa-power-off"></i> Reboot All Devices
+                    </button>
+                    <div id="sync-time-status" class="mt-4 text-sm"></div>
+                </div>
+
+                <div class="card">
+                    <div class="section-header">
+                        <h2><i class="fas fa-info-circle"></i> System Info</h2>
+                    </div>
+                    <div class="space-y-2 text-sm">
+                        <div class="flex justify-between"><span class="text-slate-500">App Version:</span> <span>1.0.0</span></div>
+                        <div class="flex justify-between"><span class="text-slate-500">Database:</span> <span>SQLite3</span></div>
+                        <div class="flex justify-between"><span class="text-slate-500">Storage Path:</span> <code class="bg-slate-800 p-1 rounded text-xs">./attendance.db</code></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Playground / Debug Center -->
+        <div id="playground-page" class="page">
+            <div class="stats-grid">
+                <div class="card">
+                    <div class="section-header"><h2>Hardware Terminal</h2></div>
+                    <div class="form-group">
+                        <label>Device IP</label>
+                        <input type="text" id="pg-ip" value="192.168.0.157">
+                    </div>
+                    <div class="form-group">
+                        <label>Port</label>
+                        <input type="number" id="pg-port" value="4370">
+                    </div>
+                    <div class="form-group">
+                        <label>Target UID</label>
+                        <input type="number" id="pg-uid" value="1">
+                    </div>
+                    <div class="playground-controls" style="margin-top:20px">
+                        <button class="btn btn-secondary" onclick="runPgCmd('beep')"><i class="fas fa-volume-up"></i> Beep</button>
+                        <button class="btn btn-secondary" onclick="runPgCmd('getInfo')"><i class="fas fa-info-circle"></i> Info</button>
+                        <button class="btn btn-secondary" onclick="runPgCmd('getUsers')"><i class="fas fa-users"></i> Users</button>
+                        <button class="btn btn-secondary" onclick="runPgCmd('getAttendance')"><i class="fas fa-list"></i> Logs</button>
+                        <button class="btn btn-secondary" onclick="runPgCmd('getFingers')"><i class="fas fa-fingerprint"></i> Fingers</button>
+                        <button class="btn btn-red" onclick="runPgCmd('reboot')"><i class="fas fa-redo-alt"></i> Reboot</button>
+                    </div>
+                </div>
+                <div class="card" style="grid-column: span 2;">
+                    <div class="section-header"><h2>Raw Response</h2></div>
+                    <div id="pg-response" style="background:#000; color:#50fa7b; padding:20px; border-radius:12px; height:350px; overflow:auto; font-family:monospace; border:1px solid var(--border-color)">
+                        [System] Ready for hardware commands...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Enrollment Modal -->
+    <div id="enroll-modal" class="modal">
+        <div class="modal-content" style="width: 500px;">
+            <div class="section-header">
+                <h2>Fingerprint Enrollment</h2>
+            </div>
+            <p class="text-slate-400 mb-6">Select a finger index to begin registration on the device sensor.</p>
+            <div class="stats-grid" style="grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 25px;">
+                <button class="btn btn-secondary finger-btn" data-idx="0">F0</button>
+                <button class="btn btn-secondary finger-btn" data-idx="1">F1</button>
+                <button class="btn btn-secondary finger-btn" data-idx="2">F2</button>
+                <button class="btn btn-secondary finger-btn" data-idx="3">F3</button>
+                <button class="btn btn-secondary finger-btn" data-idx="4">F4</button>
+                <button class="btn btn-secondary finger-btn" data-idx="5">F5</button>
+                <button class="btn btn-secondary finger-btn" data-idx="6">F6</button>
+                <button class="btn btn-secondary finger-btn" data-idx="7">F7</button>
+                <button class="btn btn-secondary finger-btn" data-idx="8">F8</button>
+                <button class="btn btn-secondary finger-btn" data-idx="9">F9</button>
+            </div>
+            <button class="btn btn-red btn-full" id="cancel-enroll-btn">Cancel</button>
+        </div>
+    </div>
+
+    <script src="renderer.js"></script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+{
+  "name": "hs_zk_attendance_desktop",
+  "version": "1.0.0",
+  "description": "Standalone Biometric Attendance Desktop Application",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "obfuscate": "javascript-obfuscator ./main.js --output ./main-obfuscated.js --compact true --self-defending true --string-array-encoding ['base64']",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "crypto-js": "^4.2.0",
+    "javascript-obfuscator": "^5.4.2",
+    "knex": "^3.2.10",
+    "node-machine-id": "^1.1.12",
+    "node-zklib": "^1.3.2",
+    "sqlite3": "^6.0.1"
+  },
+  "devDependencies": {
+    "electron": "^42.0.1"
+  }
+}
