@@ -16,6 +16,14 @@ const app = {
                 await this.saveUser();
             };
         }
+
+        // الفحص التلقائي للمستخدمين والبصمات عند الدخول
+        setTimeout(async () => {
+            if (this.devices.length > 0) {
+                await this.syncAllUsers();
+                await this.syncAllBio();
+            }
+        }, 1500);
     },
 
     bindEvents() {
