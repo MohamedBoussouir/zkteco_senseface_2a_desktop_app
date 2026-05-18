@@ -7,6 +7,7 @@ const app = {
         await this.loadDevices();
         this.showPage('dashboard');
         this.startStatusPolling();
+        this.loadDashboardStats();
 
         // Handle User Form Submission
         const userForm = document.getElementById('add-user-form');
@@ -87,6 +88,83 @@ const app = {
 
         if (pageId === 'users') this.loadUsers();
         if (pageId === 'logs') this.loadLogs();
+        if (pageId === 'dashboard') this.loadDashboardStats();
+    },
+
+    async loadDashboardStats() {
+        try {
+            // Show loading state
+            const loadingHtml = '<i class="fas fa-spinner fa-spin text-slate-500 text-sm"></i>';
+            const els = ['total-employees', 'total-fingerprints', 'today-punches', 'total-logs', 'hw-users', 'hw-fingers', 'hw-logs'];
+            els.forEach(id => {
+                const el = document.getElementById(id);
+                if (el && !el.innerText.includes('fa-spinner')) el.innerHTML = loadingHtml;
+            });
+
+            const res = await window.electronAPI.invoke('get-dashboard-stats');
+            if (res.success && res.stats) {
+                document.getElementById('total-employees').innerText = res.stats.usersCount;
+                document.getElementById('total-fingerprints').innerText = res.stats.fpCount;
+                document.getElementById('today-punches').innerText = res.stats.todayPunches;
+                document.getElementById('total-logs').innerText = res.stats.logsCount;
+
+                if (res.stats.hwInfo) {
+                    const info = res.stats.hwInfo;
+                    document.getElementById('hw-users').innerText = info.userCounts !== undefined ? info.userCounts : '--';
+                    document.getElementById('hw-user-cap').innerText = info.userCapacity || '10K';
+                    
+                    document.getElementById('hw-fingers').innerText = info.fpCounts !== undefined ? info.fpCounts : '--';
+                    document.getElementById('hw-finger-cap').innerText = info.fingerprintCapacity || '10K';
+                    
+                    document.getElementById('hw-logs').innerText = info.logCounts !== undefined ? info.logCounts : '--';
+                    document.getElementById('hw-log-cap').innerText = info.logCapacity || '100K';
+                }
+
+                if (res.stats.chartData) {
+                    this.renderChart(res.stats.chartData.labels, res.stats.chartData.data);
+                }
+            }
+        } catch(e) {
+            console.error(e);
+        }
+    },
+
+    renderChart(labels, data) {
+        const ctx = document.getElementById('attendanceChart');
+        if (!ctx) return;
+        
+        if (this.attendanceChartInstance) {
+            this.attendanceChartInstance.data.labels = labels;
+            this.attendanceChartInstance.data.datasets[0].data = data;
+            this.attendanceChartInstance.update();
+            return;
+        }
+
+        this.attendanceChartInstance = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Punches',
+                    data: data,
+                    borderColor: '#818cf8',
+                    backgroundColor: 'rgba(129, 140, 248, 0.2)',
+                    tension: 0.4,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { beginAtZero: true, grid: { color: '#334155' }, ticks: { color: '#94a3b8', precision: 0 } },
+                    x: { grid: { color: '#334155' }, ticks: { color: '#94a3b8' } }
+                },
+                plugins: {
+                    legend: { display: false }
+                }
+            }
+        });
     },
 
     async loadUsers() {

@@ -68,6 +68,51 @@ function setupIpcHandlers(mainWindow) {
         return { success: true };
     });
 
+    // Dashboard Stats
+    ipcMain.handle('get-dashboard-stats', async () => {
+        try {
+            const usersCount = (await db('users').count('id as cnt').first()).cnt || 0;
+            const logsCount = (await db('attendance').count('id as cnt').first()).cnt || 0;
+            
+            const todayStr = new Date().toISOString().split('T')[0];
+            const todayPunches = (await db('attendance').where('timestamp', 'like', `${todayStr}%`).count('id as cnt').first()).cnt || 0;
+            
+            const usersList = await db('users').select('fingerprints');
+            let fpCount = 0;
+            usersList.forEach(u => {
+                try {
+                    const fpData = JSON.parse(u.fingerprints);
+                    if (fpData && typeof fpData.count === 'number') fpCount += fpData.count;
+                } catch(e) {}
+            });
+
+            const device = await db('devices').first();
+            let hwInfo = null;
+            if (device) {
+                try {
+                    hwInfo = await withLock(device.ip, [device.port1, device.port2], async (zk) => {
+                        return await zk.getInfo();
+                    });
+                } catch(e) {}
+            }
+
+            // Get chart data (last 7 days)
+            const chartData = { labels: [], data: [] };
+            for (let i = 6; i >= 0; i--) {
+                const d = new Date();
+                d.setDate(d.getDate() - i);
+                const dateStr = d.toISOString().split('T')[0];
+                const count = (await db('attendance').where('timestamp', 'like', `${dateStr}%`).count('id as cnt').first()).cnt || 0;
+                chartData.labels.push(dateStr.slice(5)); // MM-DD
+                chartData.data.push(count);
+            }
+
+            return { success: true, stats: { usersCount, logsCount, todayPunches, fpCount, hwInfo, chartData } };
+        } catch(e) {
+            return { success: false, error: e.message };
+        }
+    });
+
     ipcMain.handle('create-user', async (event, { ip, ports, uid, userId, name, role, user }) => {
         // Handle both object-style and flat-style parameters
         const userData = user || { uid, userId, name, role };

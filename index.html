@@ -68,26 +68,64 @@
 
         <!-- Dashboard Page -->
         <div id="dashboard-page" class="page active">
-            <div class="stats-grid">
+            <div class="stats-grid" style="grid-template-columns: repeat(4, 1fr);">
                 <div class="stat-card">
                     <div class="icon-box blue"><i class="fas fa-users"></i></div>
+                    <div class="stat-info">
+                        <h3>Local Users</h3>
+                        <p id="total-employees">0</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="icon-box purple"><i class="fas fa-fingerprint"></i></div>
+                    <div class="stat-info">
+                        <h3>Fingerprints</h3>
+                        <p id="total-fingerprints">0</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="icon-box orange"><i class="fas fa-list-check"></i></div>
                     <div class="stat-info">
                         <h3>Today's Punches</h3>
                         <p id="today-punches">0</p>
                     </div>
                 </div>
                 <div class="stat-card">
-                    <div class="icon-box green"><i class="fas fa-clock-rotate-left"></i></div>
+                    <div class="icon-box green"><i class="fas fa-database"></i></div>
                     <div class="stat-info">
-                        <h3>Last Sync</h3>
-                        <p id="last-sync-time">Never</p>
+                        <h3>Total Logs</h3>
+                        <p id="total-logs">0</p>
                     </div>
                 </div>
-                <div class="stat-card">
-                    <div class="icon-box blue"><i class="fas fa-signal"></i></div>
-                    <div class="stat-info" onclick="app.updateGlobalStatus()" style="cursor:pointer">
-                        <h3>System Status</h3>
-                        <p id="device-status-text" style="font-size: 1.1rem; color: var(--success)">Checking...</p>
+            </div>
+
+            <!-- Hardware Overview -->
+            <div class="card mt-4" style="margin-top: 15px;">
+                <div class="section-header" style="margin-bottom: 10px;">
+                    <h2><i class="fas fa-microchip"></i> Hardware Overview (Live)</h2>
+                    <span id="device-status-text" class="status-badge online">Checking...</span>
+                </div>
+                <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr); gap: 10px;">
+                    <div class="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50 flex justify-between items-center">
+                        <div>
+                            <h4 class="text-slate-400 text-sm mb-1">Users on Device</h4>
+                            <div class="font-mono text-xl"><span id="hw-users">0</span> <span class="text-xs text-slate-500">/ <span id="hw-user-cap">--</span></span></div>
+                        </div>
+                        <i class="fas fa-user-tie text-blue-400 opacity-50 text-2xl"></i>
+                    </div>
+                    <div class="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50 flex justify-between items-center">
+                        <div>
+                            <h4 class="text-slate-400 text-sm mb-1">Fingerprints on Device</h4>
+                            <div class="font-mono text-xl"><span id="hw-fingers">0</span> <span class="text-xs text-slate-500">/ <span id="hw-finger-cap">--</span></span></div>
+                        </div>
+                        <i class="fas fa-fingerprint text-purple-400 opacity-50 text-2xl"></i>
+                    </div>
+                    <div class="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50 flex justify-between items-center">
+                        <div>
+                            <h4 class="text-slate-400 text-sm mb-1">Attendance Logs on Device</h4>
+                            <div class="font-mono text-xl"><span id="hw-logs">0</span> <span class="text-xs text-slate-500">/ <span id="hw-log-cap">--</span></span></div>
+                        </div>
+                        <i class="fas fa-clipboard-list text-green-400 opacity-50 text-2xl"></i>
                     </div>
                 </div>
             </div>
