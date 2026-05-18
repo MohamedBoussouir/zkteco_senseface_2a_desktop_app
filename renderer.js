@@ -665,7 +665,7 @@ const app = {
         if (statusEl) statusEl.innerHTML = 'Syncing...';
         await window.electronAPI.invoke('sync-all-times');
         this.showNotification('Clocks synchronized');
-        if (statusEl) statusEl.innerHTML = 'Done';
+        if (statusEl) statusEl.innerHTML = '';
     },
 
     async setManualTime() {
