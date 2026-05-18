@@ -60,6 +60,16 @@ async function initDb() {
             table.integer('port2');
         });
     }
+
+    // Settings Table
+    const hasSettings = await db.schema.hasTable('settings');
+    if (!hasSettings) {
+        await db.schema.createTable('settings', (table) => {
+            table.string('key').primary();
+            table.string('value');
+        });
+        await db('settings').insert({ key: 'calc_mode', value: 'calculated' });
+    }
 }
 
 module.exports = { db, initDb };

@@ -329,8 +329,19 @@
                 </div>
 
                 <div class="card" style="grid-column: span 2;">
-                    <div class="section-header">
+                    <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
                         <h2>Lateness Summary</h2>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <select id="report-status-filter" onchange="app.filterLateReport()" style="background: var(--bg-slate-900); color: var(--text-main); border: 1px solid var(--border-color); padding: 8px 12px; border-radius: 8px; font-size: 0.85rem; outline: none; cursor: pointer; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--primary-color)'" onblur="this.style.borderColor='var(--border-color)'">
+                                <option value="all" style="background: #1e293b; color: #f8fafc;">All Statuses (الكل)</option>
+                                <option value="Late" style="background: #1e293b; color: #f87171;">Late Only (المتأخرين) 🔴</option>
+                                <option value="On Time" style="background: #1e293b; color: #4ade80;">On Time Only (الملتزمين) 🟢</option>
+                            </select>
+                            <div class="search-box" style="position: relative; width: 200px;">
+                                <i class="fas fa-search" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-muted); font-size: 0.85rem;"></i>
+                                <input type="text" id="report-search-input" oninput="app.filterLateReport()" placeholder="Search Name or ID..." style="background: var(--bg-slate-900); color: var(--text-main); border: 1px solid var(--border-color); padding: 8px 12px 8px 35px; border-radius: 8px; font-size: 0.85rem; width: 100%; outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--primary-color)'" onblur="this.style.borderColor='var(--border-color)'">
+                            </div>
+                        </div>
                     </div>
                     <div class="table-container">
                         <table id="late-report-table">
@@ -374,59 +385,42 @@
                         <i class="fas fa-edit"></i> Set Time Manually
                     </button>
                     
-                    <button class="btn btn-outline btn-full" style="border-color: #ef4444; color: #ef4444;" onclick="app.rebootAllDevices()">
-                        <i class="fas fa-power-off"></i> Reboot All Devices
-                    </button>
+                    <p class="text-slate-400 mb-2" style="font-size: 0.85rem; margin-top: 15px;">Device Maintenance:</p>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                        <button class="btn btn-outline btn-full" style="border-color: #fbbf24; color: #fbbf24; padding: 10px 5px; font-size: 0.85rem;" onclick="app.rebootAllDevices()">
+                            <i class="fas fa-power-off"></i> Reboot Devices
+                        </button>
+                        <button class="btn btn-outline btn-full" style="border-color: #ef4444; color: #ef4444; padding: 10px 5px; font-size: 0.85rem;" onclick="app.clearDeviceLogs()">
+                            <i class="fas fa-trash-alt"></i> Clear ZK Logs
+                        </button>
+                    </div>
                     <div id="sync-time-status" class="mt-4 text-sm" style="text-align: center;"></div>
                 </div>
 
                 <div class="card">
                     <div class="section-header">
-                        <h2><i class="fas fa-business-time"></i> Auto-Switch Status Timers</h2>
+                        <h2><i class="fas fa-magic"></i> Attendance Logging Mode</h2>
                     </div>
-                    <p class="text-slate-400 mb-4" style="font-size: 0.85rem">Configure automatic scheduled shifts on the biometric device's hardware firmware.</p>
+                    <p class="text-slate-400 mb-4" style="font-size: 0.85rem">Choose how attendance punch states (Check-In / Check-Out) are recorded and displayed.</p>
                     
-                    <div class="form-group mb-3">
-                        <label style="font-size: 0.8rem; color: var(--text-muted)">State Keys Display</label>
-                        <select id="setting-show-state" class="form-control" style="width: 100%; background: var(--bg-slate-900); color: var(--text-main); border: 1px solid var(--border-color); padding: 8px; border-radius: 8px; margin-top: 5px;">
-                            <option value="1">Show State Buttons 🟢 (Recommended)</option>
-                            <option value="0">Hide State Buttons ❌</option>
+                    <div class="form-group mb-4">
+                        <label style="font-size: 0.8rem; color: var(--text-muted)">Logging Strategy</label>
+                        <select id="setting-calc-mode" class="form-control" onchange="app.updateStrategyExplanation()" style="width: 100%; background: var(--bg-slate-900); color: var(--text-main); border: 1px solid var(--border-color); padding: 10px; border-radius: 8px; margin-top: 5px; font-size: 0.9rem; outline: none; cursor: pointer;">
+                            <option value="calculated" style="background: #1e293b; color: #f8fafc;">Smart Calculation (First-In, Last-Out) 🤖</option>
+                            <option value="device" style="background: #1e293b; color: #f8fafc;">Device Keypad Selection (Manual F1/F2) 👤</option>
                         </select>
                     </div>
 
-                    <div class="form-group mb-3">
-                        <label style="font-size: 0.8rem; color: var(--text-muted)">State Mode</label>
-                        <select id="setting-state-mode" class="form-control" style="width: 100%; background: var(--bg-slate-900); color: var(--text-main); border: 1px solid var(--border-color); padding: 8px; border-radius: 8px; margin-top: 5px;">
-                            <option value="3">Manual and Auto Mode (Default Working) ⚙️</option>
-                            <option value="2">Auto Mode Only 🔄</option>
-                            <option value="1">Manual Mode Only 👤</option>
-                            <option value="0">Off (Disable States) 🚫</option>
-                        </select>
+                    <div id="strategy-explanation" class="p-3 mb-4 rounded-lg bg-slate-900/60 border border-slate-700/50 text-xs text-slate-400 leading-relaxed" style="min-height: 80px;">
+                        <strong>🤖 Smart Calculation Mode (Recommended):</strong><br>
+                        The app dynamically calculates attendance status based on daily punches. The first punch of the day is marked as <strong>Check-In (Arrivée)</strong> and the last punch as <strong>Check-Out (Départ)</strong>.<br>
+                        <span class="text-green-400 mt-1 block"><i class="fas fa-shield-alt"></i> The device screen remains clean and simple without any confusing status words.</span>
                     </div>
 
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px;">
-                        <div class="form-group">
-                            <label style="font-size: 0.75rem; color: var(--text-muted)">AS1 (Check-In 🟢)</label>
-                            <input type="time" id="setting-as1" value="08:00" style="background: var(--bg-slate-900); color: var(--text-main); border: 1px solid var(--border-color); padding: 6px; border-radius: 6px; width: 100%; margin-top: 4px;">
-                        </div>
-                        <div class="form-group">
-                            <label style="font-size: 0.75rem; color: var(--text-muted)">AS2 (Break-Out 🟠)</label>
-                            <input type="time" id="setting-as2" value="12:00" style="background: var(--bg-slate-900); color: var(--text-main); border: 1px solid var(--border-color); padding: 6px; border-radius: 6px; width: 100%; margin-top: 4px;">
-                        </div>
-                        <div class="form-group">
-                            <label style="font-size: 0.75rem; color: var(--text-muted)">AS3 (Break-In 🔵)</label>
-                            <input type="time" id="setting-as3" value="13:00" style="background: var(--bg-slate-900); color: var(--text-main); border: 1px solid var(--border-color); padding: 6px; border-radius: 6px; width: 100%; margin-top: 4px;">
-                        </div>
-                        <div class="form-group">
-                            <label style="font-size: 0.75rem; color: var(--text-muted)">AS4 (Check-Out 🔴)</label>
-                            <input type="time" id="setting-as4" value="17:00" style="background: var(--bg-slate-900); color: var(--text-main); border: 1px solid var(--border-color); padding: 6px; border-radius: 6px; width: 100%; margin-top: 4px;">
-                        </div>
-                    </div>
-
-                    <button class="btn btn-primary btn-full" onclick="app.programAutoSwitch()">
-                        <i class="fas fa-save"></i> Save & Program Device
+                    <button class="btn btn-primary btn-full" onclick="app.saveStrategyMode()">
+                        <i class="fas fa-check-circle"></i> Apply Strategy
                     </button>
-                    <div id="program-auto-status" class="mt-2 text-sm" style="text-align: center; color: var(--text-muted);"></div>
+                    <div id="program-auto-status" class="mt-3 text-sm text-center" style="color: var(--text-muted);"></div>
                 </div>
 
 

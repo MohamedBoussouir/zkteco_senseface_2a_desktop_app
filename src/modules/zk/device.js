@@ -145,4 +145,46 @@ async function beep(ip, ports) {
     });
 }
 
-module.exports = { rebootDevice, syncTime, setCustomDeviceTime, clearAdmin, beep };
+async function clearDeviceLogs(ip, ports) {
+    return await withLock(ip, ports, async (zk) => {
+        try { await zk.disableDevice(); } catch(e) {}
+
+        let success = false;
+        let error = null;
+
+        // Method 1: Library clearAttendanceLog
+        try {
+            await zk.clearAttendanceLog();
+            success = true;
+            console.log('[Device] Cleared logs using zk.clearAttendanceLog()');
+        } catch (e) {
+            error = e.message;
+        }
+
+        // Method 2: Command 1010 (CMD_CLEAR_ATTLOG)
+        if (!success) {
+            try {
+                await zk.executeCmd(1010, Buffer.alloc(0));
+                success = true;
+                console.log('[Device] Cleared logs using CMD 1010');
+            } catch (e) {
+                error = e.message;
+            }
+        }
+
+        // Refresh Options and Data to update UI
+        try { await zk.executeCmd(1013); } catch(e) {}
+        try { await zk.executeCmd(1014); } catch(e) {}
+        try { await zk.executeCmd(1017, Buffer.alloc(0)); } catch(e) {} // Beep
+
+        try { await zk.enableDevice(); } catch(e) {}
+
+        if (!success) {
+            throw new Error(error || 'Failed to clear attendance logs on device');
+        }
+
+        return { success: true };
+    });
+}
+
+module.exports = { rebootDevice, syncTime, setCustomDeviceTime, clearAdmin, beep, clearDeviceLogs };

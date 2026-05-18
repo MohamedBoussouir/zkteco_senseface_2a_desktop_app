@@ -153,7 +153,7 @@ const app = {
         if (pageId === 'users') this.loadUsers();
         if (pageId === 'logs') this.loadLogs();
         if (pageId === 'dashboard') this.loadDashboardStats();
-        if (pageId === 'settings') this.loadAutoSwitchRules();
+        if (pageId === 'settings') this.loadStrategyMode();
     },
 
     async loadDashboardStats() {
@@ -631,6 +631,35 @@ const app = {
         await window.electronAPI.invoke('reboot-all-devices');
     },
 
+    async clearDeviceLogs() {
+        if (!confirm('⚠️ WARNING: Are you sure you want to delete and clear ALL attendance logs inside the ZKTeco hardware device memory? This cannot be undone!')) return;
+        if (!confirm('🚨 FINAL CONFIRMATION: Double check if you have synchronized all logs to your local database before clearing the hardware. Proceed?')) return;
+        
+        const statusEl = document.getElementById('sync-time-status');
+        if (statusEl) statusEl.innerHTML = 'Clearing terminal logs... ⏳';
+        
+        this.showNotification('Cleaning device hardware memory...', 'warning');
+        const res = await window.electronAPI.invoke('clear-device-logs');
+        
+        let success = true;
+        let errMsg = '';
+        if (Array.isArray(res)) {
+            success = res.every(r => r.success);
+            errMsg = res.map(r => r.error).filter(Boolean).join(', ');
+        } else {
+            success = false;
+            errMsg = 'Connection error';
+        }
+
+        if (success) {
+            this.showNotification('ZK terminal logs cleared successfully! 🧹');
+            if (statusEl) statusEl.innerHTML = 'ZK Device logs cleared successfully! 🟢';
+        } else {
+            this.showNotification('Failed to clear logs: ' + errMsg, 'error');
+            if (statusEl) statusEl.innerHTML = 'Failed to clear device logs: ' + errMsg + ' 🔴';
+        }
+    },
+
     async syncAllClocks() {
         const statusEl = document.getElementById('sync-time-status');
         if (statusEl) statusEl.innerHTML = 'Syncing...';
@@ -671,53 +700,69 @@ const app = {
         }
     },
 
-    async loadAutoSwitchRules() {
+    async loadStrategyMode() {
         const statusEl = document.getElementById('program-auto-status');
-        if (statusEl) statusEl.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Reading device settings...';
+        if (statusEl) statusEl.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Loading logging strategy...';
         
         try {
-            const res = await window.electronAPI.invoke('get-auto-switch-rules');
-            if (res.success && res.rules) {
-                const rules = res.rules;
-                if (rules.as1) document.getElementById('setting-as1').value = rules.as1;
-                if (rules.as2) document.getElementById('setting-as2').value = rules.as2;
-                if (rules.as3) document.getElementById('setting-as3').value = rules.as3;
-                if (rules.as4) document.getElementById('setting-as4').value = rules.as4;
-                
-                document.getElementById('setting-show-state').value = rules.showState !== undefined ? rules.showState.toString() : "1";
-                document.getElementById('setting-state-mode').value = rules.stateMode !== undefined ? rules.stateMode.toString() : "3";
-                
-                if (statusEl) statusEl.innerHTML = '<span style="color: #4ade80"><i class="fas fa-check-circle mr-1"></i> Device settings loaded successfully</span>';
+            const res = await window.electronAPI.invoke('get-calc-mode');
+            if (res.success) {
+                const el = document.getElementById('setting-calc-mode');
+                if (el) {
+                    el.value = res.mode;
+                    this.updateStrategyExplanation();
+                }
+                if (statusEl) statusEl.innerHTML = '<span style="color: #4ade80"><i class="fas fa-check-circle mr-1"></i> Strategy loaded successfully</span>';
             } else {
-                if (statusEl) statusEl.innerHTML = `<span style="color: #f87171"><i class="fas fa-exclamation-triangle mr-1"></i> ${res.error || 'Failed to read device settings'}</span>`;
+                if (statusEl) statusEl.innerHTML = `<span style="color: #f87171"><i class="fas fa-exclamation-triangle mr-1"></i> Failed to load settings</span>`;
             }
         } catch (err) {
             if (statusEl) statusEl.innerHTML = `<span style="color: #f87171"><i class="fas fa-exclamation-triangle mr-1"></i> Connection failed</span>`;
         }
     },
 
-    async programAutoSwitch() {
-        const as1 = document.getElementById('setting-as1').value;
-        const as2 = document.getElementById('setting-as2').value;
-        const as3 = document.getElementById('setting-as3').value;
-        const as4 = document.getElementById('setting-as4').value;
-        const showState = parseInt(document.getElementById('setting-show-state').value);
-        const stateMode = parseInt(document.getElementById('setting-state-mode').value);
+    updateStrategyExplanation() {
+        const selectEl = document.getElementById('setting-calc-mode');
+        if (!selectEl) return;
+        const mode = selectEl.value;
+        const explanationEl = document.getElementById('strategy-explanation');
+        if (!explanationEl) return;
+        
+        if (mode === 'calculated') {
+            explanationEl.innerHTML = `
+                <strong>🤖 Smart Calculation Mode (Recommended):</strong><br>
+                The app dynamically calculates attendance status based on daily punches. The first punch of the day is marked as <strong>Check-In (Arrivée)</strong> and the last punch as <strong>Check-Out (Départ)</strong>.<br>
+                <span class="text-green-400 mt-1 block"><i class="fas fa-shield-alt"></i> The device screen remains clean and simple without any confusing status words.</span>
+            `;
+        } else {
+            explanationEl.innerHTML = `
+                <strong>👤 Device Keypad Selection Mode (Manual):</strong><br>
+                Employees must manually press the <strong>F1</strong> (Arrivée) or <strong>F2</strong> (Départ) keys on the device physical keypad before punching their finger.<br>
+                <span class="text-yellow-400 mt-1 block"><i class="fas fa-exclamation-triangle"></i> Status buttons display on the screen. Employees must remember to select their status.</span>
+            `;
+        }
+    },
+
+    async saveStrategyMode() {
+        const selectEl = document.getElementById('setting-calc-mode');
+        if (!selectEl) return;
+        const mode = selectEl.value;
 
         const statusEl = document.getElementById('program-auto-status');
-        if (statusEl) statusEl.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Programming biometric device...';
+        if (statusEl) statusEl.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Applying strategy to device...';
 
-        this.showNotification('Writing settings to device...', 'info');
+        this.showNotification('Saving strategy settings...', 'info');
 
         try {
-            const res = await window.electronAPI.invoke('set-auto-switch-rules', {
-                as1, as2, as3, as4, showState, stateMode
-            });
+            const res = await window.electronAPI.invoke('save-calc-mode', mode);
             if (res.success) {
-                this.showNotification('Biometric device programmed successfully!');
-                if (statusEl) statusEl.innerHTML = '<span style="color: #4ade80"><i class="fas fa-check-circle mr-1"></i> Successfully programmed!</span>';
+                this.showNotification('Attendance strategy applied successfully!');
+                if (statusEl) statusEl.innerHTML = '<span style="color: #4ade80"><i class="fas fa-check-circle mr-1"></i> Strategy applied successfully!</span>';
+                
+                // Refresh logs and dashboard stats instantly
+                this.loadDashboardStats();
             } else {
-                this.showNotification('Failed to program device: ' + res.error, 'error');
+                this.showNotification('Failed to apply strategy: ' + res.error, 'error');
                 if (statusEl) statusEl.innerHTML = `<span style="color: #f87171"><i class="fas fa-exclamation-triangle mr-1"></i> ${res.error}</span>`;
             }
         } catch (err) {
@@ -738,11 +783,37 @@ const app = {
         if (!date || !startTime) return;
 
         const tbody = document.querySelector('#late-report-table tbody');
-        tbody.innerHTML = '<tr><td colspan="7" class="text-center p-4">Calculating...</td></tr>';
+        if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="text-center p-4"><i class="fas fa-spinner fa-spin mr-1"></i> Calculating...</td></tr>';
 
-        const report = await window.electronAPI.invoke('get-late-report', { date, startTime, endTime });
+        try {
+            const report = await window.electronAPI.invoke('get-late-report', { date, startTime, endTime });
+            this.currentReport = report || [];
+            
+            // Clear search field and status filter on fresh generation
+            const searchInput = document.getElementById('report-search-input');
+            if (searchInput) searchInput.value = '';
+            const filterSelect = document.getElementById('report-status-filter');
+            if (filterSelect) filterSelect.value = 'all';
 
-        tbody.innerHTML = report.map(r => {
+            this.renderLateReportTable(this.currentReport);
+        } catch (err) {
+            console.error(err);
+            if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="text-center p-4 text-red-500">Failed to generate report</td></tr>';
+        }
+    },
+
+    renderLateReportTable(reportData) {
+        const tbody = document.querySelector('#late-report-table tbody');
+        if (!tbody) return;
+
+        if (!reportData || reportData.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center p-4 text-slate-500">No matching records found</td></tr>';
+            return;
+        }
+
+        const startTime = document.getElementById('report-start-time').value;
+
+        tbody.innerHTML = reportData.map(r => {
             const statusClass = r.status === 'Late' ? 'text-red-500 font-bold' :
                 (r.status === 'On Time' ? 'text-green-500 font-bold' : 'text-gray-400');
 
@@ -763,6 +834,29 @@ const app = {
                 </tr>
             `;
         }).join('');
+    },
+
+    filterLateReport() {
+        const searchInput = document.getElementById('report-search-input');
+        const filterSelect = document.getElementById('report-status-filter');
+        if (!Array.isArray(this.currentReport)) return;
+
+        const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
+        const statusFilter = filterSelect ? filterSelect.value : 'all';
+
+        const filtered = this.currentReport.filter(r => {
+            // 1. Check Search Query
+            const nameMatch = r.name && r.name.toLowerCase().includes(query);
+            const idMatch = r.user_id && r.user_id.toString().toLowerCase().includes(query);
+            const matchesQuery = !query || nameMatch || idMatch;
+
+            // 2. Check Status Filter
+            const matchesStatus = (statusFilter === 'all') || (r.status === statusFilter);
+
+            return matchesQuery && matchesStatus;
+        });
+
+        this.renderLateReportTable(filtered);
     }
 };
 

@@ -340,7 +340,51 @@ function setupIpcHandlers(mainWindow) {
     });
 
     // Logs
-    ipcMain.handle('get-logs', async () => db('attendance').select('*').orderBy('id', 'desc').limit(1000));
+    // Logs
+    ipcMain.handle('get-logs', async () => {
+        const rawLogs = await db('attendance').select('*').orderBy('timestamp', 'desc').limit(1000);
+        const calcSetting = await db('settings').where('key', 'calc_mode').first();
+        const mode = calcSetting ? calcSetting.value : 'calculated';
+
+        if (mode !== 'calculated') {
+            return rawLogs;
+        }
+
+        // Group logs by user_id and date part of the timestamp (YYYY-MM-DD)
+        const groups = {};
+        for (const log of rawLogs) {
+            if (!log.timestamp) continue;
+            // Handle ISO string timestamps
+            const dateStr = log.timestamp.substring(0, 10);
+            const key = `${log.user_id}_${dateStr}`;
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(log);
+        }
+
+        // Apply First-In Last-Out calculation to each user's daily group
+        for (const key in groups) {
+            const group = groups[key];
+            // Sort ascending to easily find earliest and latest punches
+            group.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            
+            // Earliest is always Check-In (0 / Arrivée)
+            group[0].status = 0;
+            
+            if (group.length > 1) {
+                // Latest is Check-Out (1 / Départ)
+                group[group.length - 1].status = 1;
+                
+                // Intermediate punches are marked as Break / Intermediate (2)
+                for (let i = 1; i < group.length - 1; i++) {
+                    group[i].status = 2;
+                }
+            }
+        }
+
+        // Sort back descending by timestamp to keep chronological grid view consistent
+        rawLogs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        return rawLogs;
+    });
     ipcMain.handle('delete-log', async (event, id) => {
         await db('attendance').where('id', id).delete();
         return { success: true };
@@ -429,6 +473,21 @@ function setupIpcHandlers(mainWindow) {
                 results.push({ ip: dev.ip, success: true });
             } catch (e) {
                 results.push({ ip: dev.ip, success: false });
+            }
+        }
+        return results;
+    });
+
+    ipcMain.handle('clear-device-logs', async () => {
+        const { clearDeviceLogs } = require('./zk/device');
+        const devices = await db('devices').select('*');
+        let results = [];
+        for (const dev of devices) {
+            try {
+                await clearDeviceLogs(dev.ip, [dev.port1, dev.port2]);
+                results.push({ ip: dev.ip, success: true });
+            } catch (e) {
+                results.push({ ip: dev.ip, success: false, error: e.message });
             }
         }
         return results;
@@ -526,91 +585,51 @@ function setupIpcHandlers(mainWindow) {
         });
     });
 
-    ipcMain.handle('get-auto-switch-rules', async () => {
-        const device = await db('devices').first();
-        if (!device) return { success: false, error: 'No device configured' };
-        
-        return await withLock(device.ip, [device.port1, device.port2 || device.port], async (zk) => {
-            const rules = {};
-            for (let i = 1; i <= 4; i++) {
-                try {
-                    const res = await zk.executeCmd(11, Buffer.from(`AS${i}\0`));
-                    const responseStr = res.slice(8).toString('ascii').replace(/\0/g, '');
-                    if (responseStr.includes('=')) {
-                        const val = parseInt(responseStr.split('=')[1]);
-                        if (!isNaN(val) && val !== -1) {
-                            const hour = Math.floor(val / 256);
-                            const minute = val % 256;
-                            rules[`as${i}`] = `${String(hour).padStart(2,'0')}:${String(minute).padStart(2,'0')}`;
-                        } else {
-                            rules[`as${i}`] = '';
-                        }
-                    } else {
-                        rules[`as${i}`] = '';
-                    }
-                } catch (e) {
-                    rules[`as${i}`] = '';
-                }
-            }
-            
-            // Query showState
-            try {
-                const res = await zk.executeCmd(11, Buffer.from(`~ShowState\0`));
-                const responseStr = res.slice(8).toString('ascii').replace(/\0/g, '');
-                if (responseStr.includes('=')) {
-                    rules.showState = parseInt(responseStr.split('=')[1]) || 0;
-                } else {
-                    rules.showState = 0;
-                }
-            } catch(e) {
-                rules.showState = 0;
-            }
-
-            // Query stateMode
-            try {
-                const res = await zk.executeCmd(11, Buffer.from(`StateMode\0`));
-                const responseStr = res.slice(8).toString('ascii').replace(/\0/g, '');
-                if (responseStr.includes('=')) {
-                    rules.stateMode = parseInt(responseStr.split('=')[1]) || 3;
-                } else {
-                    rules.stateMode = 3;
-                }
-            } catch(e) {
-                rules.stateMode = 3;
-            }
-
-            return { success: true, rules };
-        });
+    ipcMain.handle('get-calc-mode', async () => {
+        const row = await db('settings').where('key', 'calc_mode').first();
+        return { success: true, mode: row ? row.value : 'calculated' };
     });
 
-    ipcMain.handle('set-auto-switch-rules', async (event, { as1, as2, as3, as4, showState, stateMode }) => {
+    ipcMain.handle('save-calc-mode', async (event, mode) => {
+        await db('settings').insert({ key: 'calc_mode', value: mode }).onConflict('key').merge();
+        
         const device = await db('devices').first();
-        if (!device) return { success: false, error: 'No device configured' };
+        if (!device) return { success: true, msg: 'Saved locally (No device configured)' };
 
-        const encodeZKTime = (timeStr) => {
-            if (!timeStr) return -1;
-            const [h, m] = timeStr.split(':').map(Number);
-            return (h << 8) | m;
-        };
+        try {
+            return await withLock(device.ip, [device.port1, device.port2 || device.port], async (zk) => {
+                await zk.disableDevice();
 
-        return await withLock(device.ip, [device.port1, device.port2 || device.port], async (zk) => {
-            // Write AS1-AS4
-            await zk.executeCmd(12, Buffer.from(`AS1=${encodeZKTime(as1)}\0`));
-            await zk.executeCmd(12, Buffer.from(`AS2=${encodeZKTime(as2)}\0`));
-            await zk.executeCmd(12, Buffer.from(`AS3=${encodeZKTime(as3)}\0`));
-            await zk.executeCmd(12, Buffer.from(`AS4=${encodeZKTime(as4)}\0`));
+                // Disable all auto timers completely to avoid firmware conflicts!
+                await zk.executeCmd(12, Buffer.from('AS1=-1\0'));
+                await zk.executeCmd(12, Buffer.from('AS2=-1\0'));
+                await zk.executeCmd(12, Buffer.from('AS3=-1\0'));
+                await zk.executeCmd(12, Buffer.from('AS4=-1\0'));
+                await zk.executeCmd(12, Buffer.from('AS5=-1\0'));
+                await zk.executeCmd(12, Buffer.from('AS6=-1\0'));
 
-            // Write ShowState
-            await zk.executeCmd(12, Buffer.from(`~ShowState=${showState}\0`));
+                if (mode === 'calculated') {
+                    // Smart calculation mode: hide all state words/buttons on the screen!
+                    console.log('[Strategy] Activating Calculated mode (hiding state buttons)');
+                    await zk.executeCmd(12, Buffer.from('~ShowState=0\0'));
+                    await zk.executeCmd(12, Buffer.from('StateMode=3\0')); // Manual+Auto but with show=0 it's perfectly clean
+                } else {
+                    // Device manual selection mode: show F1/F2 status keys!
+                    console.log('[Strategy] Activating Keypad Manual mode (showing state buttons)');
+                    await zk.executeCmd(12, Buffer.from('~ShowState=1\0'));
+                    await zk.executeCmd(12, Buffer.from('StateMode=3\0')); // Allows F1/F2 keys
+                }
 
-            // Write StateMode
-            await zk.executeCmd(12, Buffer.from(`StateMode=${stateMode}\0`));
-
-            // Refresh options
-            await zk.executeCmd(1014); 
-
-            return { success: true };
-        });
+                // Apply changes to options memory
+                await zk.executeCmd(1014); // CMD_REFRESHOPTION
+                
+                await zk.enableDevice();
+                return { success: true };
+            });
+        } catch (e) {
+            console.error('[Strategy] Failed to program device:', e.message);
+            return { success: false, error: 'Saved locally, but failed to update device hardware: ' + e.message };
+        }
     });
 };
 
