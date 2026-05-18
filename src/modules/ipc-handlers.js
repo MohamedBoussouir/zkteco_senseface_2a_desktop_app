@@ -115,6 +115,27 @@ function setupIpcHandlers(mainWindow) {
                     });
                 } catch(e) {}
             }
+
+            // Fallback: calculate fingerprints from local SQLite if device didn't return them
+            let localFpCount = 0;
+            try {
+                const usersList = await db('users').select('fingerprints');
+                usersList.forEach(u => {
+                    try {
+                        const fpData = JSON.parse(u.fingerprints);
+                        if (fpData && typeof fpData.count === 'number') localFpCount += fpData.count;
+                    } catch(e) {}
+                });
+            } catch(e) {}
+
+            if (hwInfo) {
+                if (hwInfo.fpCounts === undefined || hwInfo.fpCounts === null || hwInfo.fpCounts === 0) {
+                    hwInfo.fpCounts = localFpCount;
+                }
+            } else {
+                hwInfo = { fpCounts: localFpCount };
+            }
+
             return { success: true, hwInfo };
         } catch(e) {
             return { success: false, error: e.message };
