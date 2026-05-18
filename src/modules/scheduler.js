@@ -37,7 +37,7 @@ async function startBackgroundSync(mainWindow) {
                                     timestamp: isoTs,
                                     status: log.status,
                                     device_id: device.id
-                                }).onConflict(['user_id', 'timestamp', 'device_id']).ignore();
+                                }).onConflict(['user_id', 'timestamp', 'device_id']).merge();
                             } catch (e) { }
                         }
                     });

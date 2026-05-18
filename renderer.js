@@ -34,6 +34,52 @@ const app = {
                 this.showPage(link.dataset.page);
             };
         });
+
+        const syncAllBtn = document.getElementById('sync-all-btn');
+        if (syncAllBtn) {
+            syncAllBtn.onclick = async (e) => {
+                e.preventDefault();
+                if (this.devices.length === 0) {
+                    this.showNotification('No connected devices to sync!', 'error');
+                    return;
+                }
+                syncAllBtn.disabled = true;
+                const oldHtml = syncAllBtn.innerHTML;
+                syncAllBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Syncing...';
+                
+                try {
+                    await this.syncAllUsers();
+                    await this.syncAllBio();
+                    await this.loadDashboardStats();
+                    
+                    // Refresh current active page instantly
+                    const activePage = document.querySelector('.page.active')?.id?.replace('-page', '');
+                    if (activePage === 'logs') this.loadLogs();
+                    if (activePage === 'users') this.loadUsers();
+                } catch (err) {
+                    console.error(err);
+                } finally {
+                    syncAllBtn.disabled = false;
+                    syncAllBtn.innerHTML = oldHtml;
+                }
+            };
+        }
+
+        const syncLogsBtn = document.getElementById('sync-logs-only-btn');
+        if (syncLogsBtn) {
+            syncLogsBtn.onclick = async (e) => {
+                e.preventDefault();
+                await this.syncAllLogsOnly();
+            };
+        }
+
+        const clearLogsBtn = document.getElementById('clear-all-logs-btn');
+        if (clearLogsBtn) {
+            clearLogsBtn.onclick = async (e) => {
+                e.preventDefault();
+                await this.clearAllLogs();
+            };
+        }
     },
 
     async loadDevices() {
@@ -86,6 +132,24 @@ const app = {
         const nav = document.querySelector(`.nav-item[data-page="${pageId}"]`);
         if (nav) nav.classList.add('active');
 
+        // Dynamic page title and subtitle updates
+        const pageTitles = {
+            dashboard: { title: "Dashboard", subtitle: "Welcome back, manager." },
+            users: { title: "Manage Employees", subtitle: "Create, update and enroll employee fingerprints." },
+            logs: { title: "Attendance Logs", subtitle: "View, search and sync biometric check-in history." },
+            devices: { title: "Manage Devices", subtitle: "Register and configure ZKTeco terminal hardware." },
+            reports: { title: "Late Reports", subtitle: "Analyze shift records, working hours and lateness delays." },
+            settings: { title: "Settings", subtitle: "Adjust terminal clock synchronization and system preferences." },
+            playground: { title: "Debug Center", subtitle: "Send direct command packets to device sensors." }
+        };
+
+        const headerTitle = document.getElementById('page-title');
+        const headerSubtitle = document.getElementById('page-subtitle');
+        if (headerTitle && headerSubtitle && pageTitles[pageId]) {
+            headerTitle.innerText = pageTitles[pageId].title;
+            headerSubtitle.innerText = pageTitles[pageId].subtitle;
+        }
+
         if (pageId === 'users') this.loadUsers();
         if (pageId === 'logs') this.loadLogs();
         if (pageId === 'dashboard') this.loadDashboardStats();
@@ -93,35 +157,71 @@ const app = {
 
     async loadDashboardStats() {
         try {
-            // Show loading state
-            const loadingHtml = '<i class="fas fa-spinner fa-spin text-slate-500 text-sm"></i>';
-            const els = ['total-employees', 'total-fingerprints', 'today-punches', 'total-logs', 'hw-users', 'hw-fingers', 'hw-logs'];
-            els.forEach(id => {
-                const el = document.getElementById(id);
-                if (el && !el.innerText.includes('fa-spinner')) el.innerHTML = loadingHtml;
-            });
+            // 1. Fetch Instant Local DB Stats
+            const localRes = await window.electronAPI.invoke('get-dashboard-stats-local');
+            if (localRes.success && localRes.stats) {
+                document.getElementById('total-employees').innerText = localRes.stats.usersCount;
+                document.getElementById('total-fingerprints').innerText = localRes.stats.fpCount;
+                document.getElementById('today-punches').innerText = localRes.stats.todayPunches;
+                document.getElementById('total-logs').innerText = localRes.stats.logsCount;
 
-            const res = await window.electronAPI.invoke('get-dashboard-stats');
-            if (res.success && res.stats) {
-                document.getElementById('total-employees').innerText = res.stats.usersCount;
-                document.getElementById('total-fingerprints').innerText = res.stats.fpCount;
-                document.getElementById('today-punches').innerText = res.stats.todayPunches;
-                document.getElementById('total-logs').innerText = res.stats.logsCount;
-
-                if (res.stats.hwInfo) {
-                    const info = res.stats.hwInfo;
-                    document.getElementById('hw-users').innerText = info.userCounts !== undefined ? info.userCounts : '--';
-                    document.getElementById('hw-user-cap').innerText = info.userCapacity || '10K';
-                    
-                    document.getElementById('hw-fingers').innerText = info.fpCounts !== undefined ? info.fpCounts : '--';
-                    document.getElementById('hw-finger-cap').innerText = info.fingerprintCapacity || '10K';
-                    
-                    document.getElementById('hw-logs').innerText = info.logCounts !== undefined ? info.logCounts : '--';
-                    document.getElementById('hw-log-cap').innerText = info.logCapacity || '100K';
+                if (localRes.stats.chartData) {
+                    this.renderChart(localRes.stats.chartData.labels, localRes.stats.chartData.data);
                 }
 
-                if (res.stats.chartData) {
-                    this.renderChart(res.stats.chartData.labels, res.stats.chartData.data);
+                // Render Dashboard Recent Activity
+                const logs = await window.electronAPI.invoke('get-logs');
+                const recentTbody = document.querySelector('#recent-table tbody');
+                if (recentTbody && Array.isArray(logs)) {
+                    recentTbody.innerHTML = logs.slice(0, 5).map(l => `
+                        <tr class="hover:bg-slate-800/30">
+                            <td class="p-3 border-b border-slate-700 font-medium">${l.user_name}</td>
+                            <td class="p-3 border-b border-slate-700 text-slate-400">${l.user_id}</td>
+                            <td class="p-3 border-b border-slate-700">${new Date(l.timestamp).toLocaleString()}</td>
+                            <td class="p-3 border-b border-slate-700 text-slate-500">Device ${l.device_id}</td>
+                        </tr>
+                    `).join('');
+                }
+            }
+
+            // 2. Show Loading Spinners ONLY for Hardware Overview
+            const loadingHtml = '<i class="fas fa-spinner fa-spin text-slate-500 text-sm"></i>';
+            const hwEls = ['hw-users', 'hw-fingers', 'hw-logs'];
+            hwEls.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.innerHTML = loadingHtml;
+            });
+            const statusEl = document.getElementById('device-status-text');
+            if (statusEl) {
+                statusEl.className = 'status-badge warning';
+                statusEl.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Checking...';
+            }
+
+            // 3. Fetch Live Hardware Stats (Async delay)
+            const hwRes = await window.electronAPI.invoke('get-dashboard-stats-hw');
+            if (hwRes.success && hwRes.hwInfo) {
+                const info = hwRes.hwInfo;
+                document.getElementById('hw-users').innerText = info.userCounts !== undefined ? info.userCounts : '--';
+                document.getElementById('hw-user-cap').innerText = info.userCapacity || '10K';
+                
+                document.getElementById('hw-fingers').innerText = info.fpCounts !== undefined ? info.fpCounts : '--';
+                document.getElementById('hw-finger-cap').innerText = info.fingerprintCapacity || '10K';
+                
+                document.getElementById('hw-logs').innerText = info.logCounts !== undefined ? info.logCounts : '--';
+                document.getElementById('hw-log-cap').innerText = info.logCapacity || '100K';
+
+                if (statusEl) {
+                    statusEl.className = 'status-badge online';
+                    statusEl.innerText = 'Online & Synced';
+                }
+            } else {
+                hwEls.forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.innerText = 'Offline';
+                });
+                if (statusEl) {
+                    statusEl.className = 'status-badge error';
+                    statusEl.innerText = 'Offline';
                 }
             }
         } catch(e) {
@@ -269,6 +369,47 @@ const app = {
         document.getElementById('user-cancel-btn').style.display = 'none';
     },
 
+    async syncAllLogsOnly() {
+        if (this.devices.length === 0) {
+            this.showNotification('No connected devices to sync!', 'error');
+            return;
+        }
+        
+        const syncLogsBtn = document.getElementById('sync-logs-only-btn');
+        let oldHtml = '';
+        if (syncLogsBtn) {
+            syncLogsBtn.disabled = true;
+            oldHtml = syncLogsBtn.innerHTML;
+            syncLogsBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Syncing Logs...';
+        }
+        
+        this.showNotification('Fetching attendance logs only (Lightning Fast)...', 'info');
+        let totalSynced = 0;
+        try {
+            for (const dev of this.devices) {
+                const res = await window.electronAPI.invoke('sync-logs-from-device', { ip: dev.ip, ports: [dev.port1, dev.port2] });
+                if (res.success) {
+                    totalSynced += res.logsCount || 0;
+                }
+            }
+            this.showNotification(`Successfully synchronized ${totalSynced} attendance logs!`);
+            await this.loadDashboardStats();
+            
+            // Refresh current active page instantly
+            const activePage = document.querySelector('.page.active')?.id?.replace('-page', '');
+            if (activePage === 'logs') this.loadLogs();
+            if (activePage === 'users') this.loadUsers();
+        } catch (err) {
+            console.error(err);
+            this.showNotification('Failed to sync logs: ' + err.message, 'error');
+        } finally {
+            if (syncLogsBtn) {
+                syncLogsBtn.disabled = false;
+                syncLogsBtn.innerHTML = oldHtml;
+            }
+        }
+    },
+
     async syncAllUsers() {
         this.showNotification('Fetching all users from devices...', 'info');
         for (const dev of this.devices) {
@@ -386,16 +527,68 @@ const app = {
         const logs = await window.electronAPI.invoke('get-logs');
         const tbody = document.querySelector('#logs-table tbody');
         if (!tbody) return;
-        tbody.innerHTML = logs.map(l => `
-            <tr>
+
+        const getStatusBadge = (status) => {
+            const s = parseInt(status);
+            switch (s) {
+                case 0:
+                    return '<span class="status-badge online" style="background: rgba(34, 197, 94, 0.1); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.2);"><i class="fas fa-sign-in-alt mr-1"></i> Check-In</span>';
+                case 1:
+                    return '<span class="status-badge error" style="background: rgba(239, 68, 68, 0.1); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.2);"><i class="fas fa-sign-out-alt mr-1"></i> Check-Out</span>';
+                case 2:
+                    return '<span class="status-badge warning" style="background: rgba(245, 158, 11, 0.1); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.2);"><i class="fas fa-coffee mr-1"></i> Break-Out</span>';
+                case 3:
+                    return '<span class="status-badge info" style="background: rgba(59, 130, 246, 0.1); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.2);"><i class="fas fa-laptop mr-1"></i> Break-In</span>';
+                case 4:
+                    return '<span class="status-badge" style="background: rgba(139, 92, 246, 0.1); color: #a78bfa; border: 1px solid rgba(139, 92, 246, 0.2);"><i class="fas fa-business-time mr-1"></i> OT In</span>';
+                case 5:
+                    return '<span class="status-badge" style="background: rgba(236, 72, 153, 0.1); color: #f472b6; border: 1px solid rgba(236, 72, 153, 0.2);"><i class="fas fa-business-time mr-1"></i> OT Out</span>';
+                default:
+                    return '<span class="status-badge online"><i class="fas fa-check mr-1"></i> Verified</span>';
+            }
+        };
+
+        tbody.innerHTML = logs.slice(0, 100).map(l => `
+            <tr class="hover:bg-slate-800/30">
                 <td class="p-3 border-b border-slate-700 font-medium">${l.user_name}</td>
                 <td class="p-3 border-b border-slate-700 text-slate-400">${l.user_id}</td>
                 <td class="p-3 border-b border-slate-700">${new Date(l.timestamp).toLocaleString()}</td>
                 <td class="p-3 border-b border-slate-700">
-                    <span class="status-badge online">Verified</span>
+                    ${getStatusBadge(l.status)}
+                </td>
+                <td class="p-3 border-b border-slate-700" style="text-align: right;">
+                    <button class="btn btn-icon btn-red btn-xs" onclick="app.deleteLog(${l.id})" title="Delete Log">
+                        <i class="fas fa-trash"></i>
+                    </button>
                 </td>
             </tr>
-        `).reverse().slice(0, 100).join('');
+        `).join('');
+    },
+
+    async deleteLog(id) {
+        if (!confirm('Are you sure you want to delete this attendance record?')) return;
+        this.showNotification('Deleting attendance record...', 'info');
+        const res = await window.electronAPI.invoke('delete-log', id);
+        if (res.success) {
+            this.showNotification('Attendance record deleted');
+            this.loadLogs();
+            this.loadDashboardStats();
+        } else {
+            this.showNotification('Failed: ' + res.error, 'error');
+        }
+    },
+
+    async clearAllLogs() {
+        if (!confirm('⚠️ WARNING: This will permanently delete ALL attendance records from the local database! Are you absolutely sure?')) return;
+        this.showNotification('Clearing all attendance logs...', 'info');
+        const res = await window.electronAPI.invoke('clear-all-logs');
+        if (res.success) {
+            this.showNotification('All local attendance logs cleared successfully');
+            this.loadLogs();
+            this.loadDashboardStats();
+        } else {
+            this.showNotification('Failed: ' + res.error, 'error');
+        }
     },
 
     showNotification(msg, type = 'success') {

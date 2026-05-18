@@ -232,8 +232,16 @@
         <!-- Attendance Logs Page -->
         <div id="logs-page" class="page">
             <div class="card">
-                <div class="section-header">
+                <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                     <h2><i class="fas fa-history"></i> Attendance Records</h2>
+                    <div style="display: flex; gap: 10px;">
+                        <button class="btn btn-red" id="clear-all-logs-btn" style="font-size: 0.85rem; padding: 6px 12px; border-radius: 8px; margin: 0; background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);">
+                            <i class="fas fa-trash-alt mr-1"></i> Clear All Logs
+                        </button>
+                        <button class="btn btn-secondary" id="sync-logs-only-btn" style="background: rgba(99, 102, 241, 0.15); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.3); font-size: 0.85rem; padding: 6px 12px; border-radius: 8px; margin: 0;">
+                            <i class="fas fa-bolt"></i> Fast Sync Logs
+                        </button>
+                    </div>
                 </div>
                 <div class="table-container">
                     <table id="logs-table">
@@ -243,6 +251,7 @@
                                 <th>User ID</th>
                                 <th>Timestamp</th>
                                 <th>Status</th>
+                                <th style="text-align: right;">Actions</th>
                             </tr>
                         </thead>
                         <tbody>

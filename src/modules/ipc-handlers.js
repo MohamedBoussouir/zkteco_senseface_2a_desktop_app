@@ -68,8 +68,8 @@ function setupIpcHandlers(mainWindow) {
         return { success: true };
     });
 
-    // Dashboard Stats
-    ipcMain.handle('get-dashboard-stats', async () => {
+    // Dashboard Stats (Instant Local DB)
+    ipcMain.handle('get-dashboard-stats-local', async () => {
         try {
             const usersCount = (await db('users').count('id as cnt').first()).cnt || 0;
             const logsCount = (await db('attendance').count('id as cnt').first()).cnt || 0;
@@ -86,16 +86,6 @@ function setupIpcHandlers(mainWindow) {
                 } catch(e) {}
             });
 
-            const device = await db('devices').first();
-            let hwInfo = null;
-            if (device) {
-                try {
-                    hwInfo = await withLock(device.ip, [device.port1, device.port2], async (zk) => {
-                        return await zk.getInfo();
-                    });
-                } catch(e) {}
-            }
-
             // Get chart data (last 7 days)
             const chartData = { labels: [], data: [] };
             for (let i = 6; i >= 0; i--) {
@@ -107,7 +97,25 @@ function setupIpcHandlers(mainWindow) {
                 chartData.data.push(count);
             }
 
-            return { success: true, stats: { usersCount, logsCount, todayPunches, fpCount, hwInfo, chartData } };
+            return { success: true, stats: { usersCount, logsCount, todayPunches, fpCount, chartData } };
+        } catch(e) {
+            return { success: false, error: e.message };
+        }
+    });
+
+    // Dashboard Stats (Live Hardware)
+    ipcMain.handle('get-dashboard-stats-hw', async () => {
+        try {
+            const device = await db('devices').first();
+            let hwInfo = null;
+            if (device) {
+                try {
+                    hwInfo = await withLock(device.ip, [device.port1, device.port2], async (zk) => {
+                        return await zk.getInfo();
+                    });
+                } catch(e) {}
+            }
+            return { success: true, hwInfo };
         } catch(e) {
             return { success: false, error: e.message };
         }
@@ -154,26 +162,85 @@ function setupIpcHandlers(mainWindow) {
             const device = await db('devices').where('ip', ip).first();
             if (!device) return { success: false, error: 'Device not found' };
 
-            const users = await zk.getUsers();
-            if (!Array.isArray(users)) {
-                console.error(`[Sync] Failed to fetch users from ${ip}: Response was not an array`);
+            // 1. Sync users using the central helper (performs obsolete user & log cleanup)
+            let usersCount = 0;
+            try {
+                usersCount = await syncUsersFromDevice(zk, device.id);
+            } catch (err) {
+                console.error(`[Sync] Failed to fetch users from ${ip}:`, err.message);
                 return { success: false, error: 'Device busy or connection timed out' };
             }
 
-            for (const u of users) {
-                await db('users')
-                    .insert({
-                        uid: u.uid,
-                        user_id: u.userId,
-                        name: u.name,
-                        role: u.role,
-                        password: u.password,
-                        device_id: device.id
-                    })
-                    .onConflict(['user_id', 'device_id'])
-                    .merge();
+            // 2. Sync attendance logs directly and merge them to update existing records
+            let logsCount = 0;
+            try {
+                const logs = await zk.getAttendances();
+                const lData = Array.isArray(logs) ? logs : (logs.data || []);
+                for (const log of lData) {
+                    try {
+                        const rawId = log.deviceUserId || log.userId;
+                        if (!rawId) continue;
+
+                        let ts = log.recordTime || log.timestamp;
+                        if (!ts) continue;
+                        
+                        const isoTs = ts instanceof Date ? ts.toISOString() : new Date(ts).toISOString();
+
+                        const user = await db('users').where({ user_id: rawId.toString(), device_id: device.id }).first();
+                        await db('attendance').insert({
+                            user_id: rawId.toString(),
+                            user_name: user ? user.name : `User ${rawId}`,
+                            timestamp: isoTs,
+                            status: log.status,
+                            device_id: device.id
+                        }).onConflict(['user_id', 'timestamp', 'device_id']).merge();
+                        logsCount++;
+                    } catch (e) {}
+                }
+            } catch (err) {
+                console.error(`[Sync] Failed to fetch attendance logs from ${ip}:`, err.message);
             }
-            return { success: true, count: users.length };
+
+            return { success: true, count: usersCount, logsCount };
+        });
+    });
+
+    ipcMain.handle('sync-logs-from-device', async (event, { ip, ports }) => {
+        return await withLock(ip, ports, async (zk) => {
+            const device = await db('devices').where('ip', ip).first();
+            if (!device) return { success: false, error: 'Device not found' };
+
+            let logsCount = 0;
+            try {
+                const logs = await zk.getAttendances();
+                const lData = Array.isArray(logs) ? logs : (logs.data || []);
+                for (const log of lData) {
+                    try {
+                        const rawId = log.deviceUserId || log.userId;
+                        if (!rawId) continue;
+
+                        let ts = log.recordTime || log.timestamp;
+                        if (!ts) continue;
+                        
+                        const isoTs = ts instanceof Date ? ts.toISOString() : new Date(ts).toISOString();
+
+                        const user = await db('users').where({ user_id: rawId.toString(), device_id: device.id }).first();
+                        await db('attendance').insert({
+                            user_id: rawId.toString(),
+                            user_name: user ? user.name : `User ${rawId}`,
+                            timestamp: isoTs,
+                            status: log.status,
+                            device_id: device.id
+                        }).onConflict(['user_id', 'timestamp', 'device_id']).merge();
+                        logsCount++;
+                    } catch (e) {}
+                }
+            } catch (err) {
+                console.error(`[Sync-Logs] Failed to fetch attendance logs from ${ip}:`, err.message);
+                return { success: false, error: err.message };
+            }
+
+            return { success: true, logsCount };
         });
     });
 

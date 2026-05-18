@@ -48,13 +48,34 @@ async function syncUsersFromDevice(zk, deviceId) {
     const users = await zk.getUsers();
     const uData = Array.isArray(users) ? users : (users.data || []);
     
+    // 1. Identify users currently on the device
+    const deviceUserIds = [];
+    for (const user of uData) {
+        const cleanUserId = (user.userId || '').replace(/[^\x20-\x7E]/g, '').trim();
+        if (cleanUserId) {
+            deviceUserIds.push(cleanUserId);
+        }
+    }
+
+    // 2. Identify and delete users in DB that are no longer on the device
+    const dbUsers = await db('users').where({ device_id: deviceId }).select('user_id');
+    const dbUserIds = dbUsers.map(u => u.user_id);
+    const usersToDelete = dbUserIds.filter(id => !deviceUserIds.includes(id));
+
+    if (usersToDelete.length > 0) {
+        console.log(`[Sync] Removing ${usersToDelete.length} obsolete users and their logs from database:`, usersToDelete);
+        // Delete users
+        await db('users').where({ device_id: deviceId }).whereIn('user_id', usersToDelete).delete();
+        // Delete logs
+        await db('attendance').where({ device_id: deviceId }).whereIn('user_id', usersToDelete).delete();
+    }
+    
+    // 3. Upsert current users
     for (const user of uData) {
         const cleanName = (user.name || '').replace(/[^\x20-\x7E\u0600-\u06FF]/g, '').trim();
         const cleanUserId = (user.userId || '').replace(/[^\x20-\x7E]/g, '').trim();
         if (!cleanUserId) continue;
 
-        // Simplified: We don't poll for 10 fingers here to avoid K40 strain.
-        // Fingerprints metadata will be updated on-demand if needed.
         await db('users').insert({
             uid: user.uid,
             user_id: cleanUserId,

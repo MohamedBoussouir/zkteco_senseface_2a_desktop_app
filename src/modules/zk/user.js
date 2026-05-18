@@ -40,6 +40,9 @@ async function deleteUser(ip, ports, uid, userId) {
         const device = await db('devices').where('ip', ip).first();
         if (device) {
             await db('users').where({ uid, device_id: device.id }).delete();
+            if (userId) {
+                await db('attendance').where({ user_id: userId.toString(), device_id: device.id }).delete();
+            }
         }
         return { success: true };
     });
