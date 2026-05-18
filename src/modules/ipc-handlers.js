@@ -457,6 +457,28 @@ function setupIpcHandlers(mainWindow) {
         return results;
     });
 
+    ipcMain.handle('set-custom-time', async (event, dateTimeStr) => {
+        const { setCustomDeviceTime } = require('./zk/device');
+        const devices = await db('devices').select('*');
+        let results = [];
+        for (const dev of devices) {
+            let success = false;
+            let error = null;
+            for (let i = 0; i < 3; i++) {
+                try {
+                    await setCustomDeviceTime(dev.ip, [dev.port1, dev.port2], dateTimeStr);
+                    success = true;
+                    break;
+                } catch (e) {
+                    error = e.message;
+                    await new Promise(r => setTimeout(r, 1000));
+                }
+            }
+            results.push({ ip: dev.ip, success, error });
+        }
+        return results;
+    });
+
     ipcMain.handle('get-late-report', async (event, { date, startTime, endTime }) => {
         const users = await db('users').select('user_id', 'name');
         const logs = await db('attendance').where('timestamp', 'like', `${date}%`).select('*');
@@ -501,6 +523,93 @@ function setupIpcHandlers(mainWindow) {
                 delay,
                 status
             };
+        });
+    });
+
+    ipcMain.handle('get-auto-switch-rules', async () => {
+        const device = await db('devices').first();
+        if (!device) return { success: false, error: 'No device configured' };
+        
+        return await withLock(device.ip, [device.port1, device.port2 || device.port], async (zk) => {
+            const rules = {};
+            for (let i = 1; i <= 4; i++) {
+                try {
+                    const res = await zk.executeCmd(11, Buffer.from(`AS${i}\0`));
+                    const responseStr = res.slice(8).toString('ascii').replace(/\0/g, '');
+                    if (responseStr.includes('=')) {
+                        const val = parseInt(responseStr.split('=')[1]);
+                        if (!isNaN(val) && val !== -1) {
+                            const hour = Math.floor(val / 256);
+                            const minute = val % 256;
+                            rules[`as${i}`] = `${String(hour).padStart(2,'0')}:${String(minute).padStart(2,'0')}`;
+                        } else {
+                            rules[`as${i}`] = '';
+                        }
+                    } else {
+                        rules[`as${i}`] = '';
+                    }
+                } catch (e) {
+                    rules[`as${i}`] = '';
+                }
+            }
+            
+            // Query showState
+            try {
+                const res = await zk.executeCmd(11, Buffer.from(`~ShowState\0`));
+                const responseStr = res.slice(8).toString('ascii').replace(/\0/g, '');
+                if (responseStr.includes('=')) {
+                    rules.showState = parseInt(responseStr.split('=')[1]) || 0;
+                } else {
+                    rules.showState = 0;
+                }
+            } catch(e) {
+                rules.showState = 0;
+            }
+
+            // Query stateMode
+            try {
+                const res = await zk.executeCmd(11, Buffer.from(`StateMode\0`));
+                const responseStr = res.slice(8).toString('ascii').replace(/\0/g, '');
+                if (responseStr.includes('=')) {
+                    rules.stateMode = parseInt(responseStr.split('=')[1]) || 3;
+                } else {
+                    rules.stateMode = 3;
+                }
+            } catch(e) {
+                rules.stateMode = 3;
+            }
+
+            return { success: true, rules };
+        });
+    });
+
+    ipcMain.handle('set-auto-switch-rules', async (event, { as1, as2, as3, as4, showState, stateMode }) => {
+        const device = await db('devices').first();
+        if (!device) return { success: false, error: 'No device configured' };
+
+        const encodeZKTime = (timeStr) => {
+            if (!timeStr) return -1;
+            const [h, m] = timeStr.split(':').map(Number);
+            return (h << 8) | m;
+        };
+
+        return await withLock(device.ip, [device.port1, device.port2 || device.port], async (zk) => {
+            // Write AS1-AS4
+            await zk.executeCmd(12, Buffer.from(`AS1=${encodeZKTime(as1)}\0`));
+            await zk.executeCmd(12, Buffer.from(`AS2=${encodeZKTime(as2)}\0`));
+            await zk.executeCmd(12, Buffer.from(`AS3=${encodeZKTime(as3)}\0`));
+            await zk.executeCmd(12, Buffer.from(`AS4=${encodeZKTime(as4)}\0`));
+
+            // Write ShowState
+            await zk.executeCmd(12, Buffer.from(`~ShowState=${showState}\0`));
+
+            // Write StateMode
+            await zk.executeCmd(12, Buffer.from(`StateMode=${stateMode}\0`));
+
+            // Refresh options
+            await zk.executeCmd(1014); 
+
+            return { success: true };
         });
     });
 };

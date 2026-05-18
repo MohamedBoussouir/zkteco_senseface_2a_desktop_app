@@ -153,6 +153,7 @@ const app = {
         if (pageId === 'users') this.loadUsers();
         if (pageId === 'logs') this.loadLogs();
         if (pageId === 'dashboard') this.loadDashboardStats();
+        if (pageId === 'settings') this.loadAutoSwitchRules();
     },
 
     async loadDashboardStats() {
@@ -636,6 +637,93 @@ const app = {
         await window.electronAPI.invoke('sync-all-times');
         this.showNotification('Clocks synchronized');
         if (statusEl) statusEl.innerHTML = 'Done';
+    },
+
+    async setManualTime() {
+        const inputVal = document.getElementById('manual-datetime-input').value;
+        if (!inputVal) {
+            this.showNotification('Please select a date and time first', 'error');
+            return;
+        }
+
+        const statusEl = document.getElementById('sync-time-status');
+        if (statusEl) statusEl.innerHTML = 'Setting manual time...';
+        
+        this.showNotification('Programming custom time...', 'info');
+        const res = await window.electronAPI.invoke('set-custom-time', inputVal);
+        
+        let success = true;
+        let errMsg = '';
+        if (Array.isArray(res)) {
+            success = res.every(r => r.success);
+            errMsg = res.map(r => r.error).filter(Boolean).join(', ');
+        } else {
+            success = false;
+            errMsg = 'Connection error';
+        }
+
+        if (success) {
+            this.showNotification('Device clock set successfully!');
+            if (statusEl) statusEl.innerHTML = 'Manual time programmed successfully! 🟢';
+        } else {
+            this.showNotification('Failed to set time: ' + errMsg, 'error');
+            if (statusEl) statusEl.innerHTML = 'Failed: ' + errMsg + ' 🔴';
+        }
+    },
+
+    async loadAutoSwitchRules() {
+        const statusEl = document.getElementById('program-auto-status');
+        if (statusEl) statusEl.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Reading device settings...';
+        
+        try {
+            const res = await window.electronAPI.invoke('get-auto-switch-rules');
+            if (res.success && res.rules) {
+                const rules = res.rules;
+                if (rules.as1) document.getElementById('setting-as1').value = rules.as1;
+                if (rules.as2) document.getElementById('setting-as2').value = rules.as2;
+                if (rules.as3) document.getElementById('setting-as3').value = rules.as3;
+                if (rules.as4) document.getElementById('setting-as4').value = rules.as4;
+                
+                document.getElementById('setting-show-state').value = rules.showState !== undefined ? rules.showState.toString() : "1";
+                document.getElementById('setting-state-mode').value = rules.stateMode !== undefined ? rules.stateMode.toString() : "3";
+                
+                if (statusEl) statusEl.innerHTML = '<span style="color: #4ade80"><i class="fas fa-check-circle mr-1"></i> Device settings loaded successfully</span>';
+            } else {
+                if (statusEl) statusEl.innerHTML = `<span style="color: #f87171"><i class="fas fa-exclamation-triangle mr-1"></i> ${res.error || 'Failed to read device settings'}</span>`;
+            }
+        } catch (err) {
+            if (statusEl) statusEl.innerHTML = `<span style="color: #f87171"><i class="fas fa-exclamation-triangle mr-1"></i> Connection failed</span>`;
+        }
+    },
+
+    async programAutoSwitch() {
+        const as1 = document.getElementById('setting-as1').value;
+        const as2 = document.getElementById('setting-as2').value;
+        const as3 = document.getElementById('setting-as3').value;
+        const as4 = document.getElementById('setting-as4').value;
+        const showState = parseInt(document.getElementById('setting-show-state').value);
+        const stateMode = parseInt(document.getElementById('setting-state-mode').value);
+
+        const statusEl = document.getElementById('program-auto-status');
+        if (statusEl) statusEl.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Programming biometric device...';
+
+        this.showNotification('Writing settings to device...', 'info');
+
+        try {
+            const res = await window.electronAPI.invoke('set-auto-switch-rules', {
+                as1, as2, as3, as4, showState, stateMode
+            });
+            if (res.success) {
+                this.showNotification('Biometric device programmed successfully!');
+                if (statusEl) statusEl.innerHTML = '<span style="color: #4ade80"><i class="fas fa-check-circle mr-1"></i> Successfully programmed!</span>';
+            } else {
+                this.showNotification('Failed to program device: ' + res.error, 'error');
+                if (statusEl) statusEl.innerHTML = `<span style="color: #f87171"><i class="fas fa-exclamation-triangle mr-1"></i> ${res.error}</span>`;
+            }
+        } catch (err) {
+            this.showNotification('Connection error: ' + err.message, 'error');
+            if (statusEl) statusEl.innerHTML = '<span style="color: #f87171"><i class="fas fa-exclamation-triangle mr-1"></i> Connection failed</span>';
+        }
     },
 
     setReportToday() {

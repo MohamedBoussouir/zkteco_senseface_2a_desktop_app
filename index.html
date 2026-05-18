@@ -361,15 +361,74 @@
                     <div class="section-header">
                         <h2><i class="fas fa-clock"></i> Device Time Settings</h2>
                     </div>
-                    <p class="text-slate-400 mb-4">Synchronize all biometric devices with the current computer time to ensure accurate logs.</p>
-                    <button class="btn btn-primary btn-full mb-2" onclick="app.syncAllClocks()">
-                        <i class="fas fa-sync-alt"></i> Sync All Devices Time
+                    <p class="text-slate-400 mb-3" style="font-size: 0.85rem;">Automatic Sync (Sync with Computer Clock):</p>
+                    <button class="btn btn-primary btn-full mb-4" onclick="app.syncAllClocks()">
+                        <i class="fas fa-sync-alt"></i> Sync Automatically
                     </button>
-                    <button class="btn btn-outline btn-full" onclick="app.rebootAllDevices()">
+                    
+                    <p class="text-slate-400 mb-2" style="font-size: 0.85rem;">Manual Time Adjustment:</p>
+                    <div class="form-group mb-2">
+                        <input type="datetime-local" id="manual-datetime-input" style="background: var(--bg-slate-900); color: var(--text-main); border: 1px solid var(--border-color); padding: 8px; border-radius: 8px; width: 100%; margin-bottom: 8px; outline: none; font-size: 0.9rem;">
+                    </div>
+                    <button class="btn btn-outline btn-full mb-4" onclick="app.setManualTime()">
+                        <i class="fas fa-edit"></i> Set Time Manually
+                    </button>
+                    
+                    <button class="btn btn-outline btn-full" style="border-color: #ef4444; color: #ef4444;" onclick="app.rebootAllDevices()">
                         <i class="fas fa-power-off"></i> Reboot All Devices
                     </button>
-                    <div id="sync-time-status" class="mt-4 text-sm"></div>
+                    <div id="sync-time-status" class="mt-4 text-sm" style="text-align: center;"></div>
                 </div>
+
+                <div class="card">
+                    <div class="section-header">
+                        <h2><i class="fas fa-business-time"></i> Auto-Switch Status Timers</h2>
+                    </div>
+                    <p class="text-slate-400 mb-4" style="font-size: 0.85rem">Configure automatic scheduled shifts on the biometric device's hardware firmware.</p>
+                    
+                    <div class="form-group mb-3">
+                        <label style="font-size: 0.8rem; color: var(--text-muted)">State Keys Display</label>
+                        <select id="setting-show-state" class="form-control" style="width: 100%; background: var(--bg-slate-900); color: var(--text-main); border: 1px solid var(--border-color); padding: 8px; border-radius: 8px; margin-top: 5px;">
+                            <option value="1">Show State Buttons 🟢 (Recommended)</option>
+                            <option value="0">Hide State Buttons ❌</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group mb-3">
+                        <label style="font-size: 0.8rem; color: var(--text-muted)">State Mode</label>
+                        <select id="setting-state-mode" class="form-control" style="width: 100%; background: var(--bg-slate-900); color: var(--text-main); border: 1px solid var(--border-color); padding: 8px; border-radius: 8px; margin-top: 5px;">
+                            <option value="3">Manual and Auto Mode (Default Working) ⚙️</option>
+                            <option value="2">Auto Mode Only 🔄</option>
+                            <option value="1">Manual Mode Only 👤</option>
+                            <option value="0">Off (Disable States) 🚫</option>
+                        </select>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px;">
+                        <div class="form-group">
+                            <label style="font-size: 0.75rem; color: var(--text-muted)">AS1 (Check-In 🟢)</label>
+                            <input type="time" id="setting-as1" value="08:00" style="background: var(--bg-slate-900); color: var(--text-main); border: 1px solid var(--border-color); padding: 6px; border-radius: 6px; width: 100%; margin-top: 4px;">
+                        </div>
+                        <div class="form-group">
+                            <label style="font-size: 0.75rem; color: var(--text-muted)">AS2 (Break-Out 🟠)</label>
+                            <input type="time" id="setting-as2" value="12:00" style="background: var(--bg-slate-900); color: var(--text-main); border: 1px solid var(--border-color); padding: 6px; border-radius: 6px; width: 100%; margin-top: 4px;">
+                        </div>
+                        <div class="form-group">
+                            <label style="font-size: 0.75rem; color: var(--text-muted)">AS3 (Break-In 🔵)</label>
+                            <input type="time" id="setting-as3" value="13:00" style="background: var(--bg-slate-900); color: var(--text-main); border: 1px solid var(--border-color); padding: 6px; border-radius: 6px; width: 100%; margin-top: 4px;">
+                        </div>
+                        <div class="form-group">
+                            <label style="font-size: 0.75rem; color: var(--text-muted)">AS4 (Check-Out 🔴)</label>
+                            <input type="time" id="setting-as4" value="17:00" style="background: var(--bg-slate-900); color: var(--text-main); border: 1px solid var(--border-color); padding: 6px; border-radius: 6px; width: 100%; margin-top: 4px;">
+                        </div>
+                    </div>
+
+                    <button class="btn btn-primary btn-full" onclick="app.programAutoSwitch()">
+                        <i class="fas fa-save"></i> Save & Program Device
+                    </button>
+                    <div id="program-auto-status" class="mt-2 text-sm" style="text-align: center; color: var(--text-muted);"></div>
+                </div>
+
 
                 <div class="card">
                     <div class="section-header">
