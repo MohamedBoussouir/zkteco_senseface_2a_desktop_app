@@ -7,7 +7,7 @@ const app = {
         await this.loadDevices();
         this.showPage('dashboard');
         this.startStatusPolling();
-        
+
         // Handle User Form Submission
         const userForm = document.getElementById('add-user-form');
         if (userForm) {
@@ -70,10 +70,10 @@ const app = {
     showPage(pageId) {
         document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
         document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-        
+
         const target = document.getElementById(`${pageId}-page`);
         if (target) target.classList.add('active');
-        
+
         const nav = document.querySelector(`.nav-item[data-page="${pageId}"]`);
         if (nav) nav.classList.add('active');
 
@@ -92,31 +92,32 @@ const app = {
                     <td class="p-3 border-b border-slate-700 text-slate-400">${u.user_id}</td>
                     <td class="p-3 border-b border-slate-700">
                         ${(() => {
-                            let fpData = null;
-                            try { fpData = JSON.parse(u.fingerprints || 'null'); } catch(e) {}
-                            const count = fpData && typeof fpData === 'object' && fpData.count !== undefined
-                                ? fpData.count
-                                : (Array.isArray(fpData) ? fpData.length : 0);
-                            
-                            if (count === 0) return '<span class="text-slate-600 italic text-xs">No fingerprints</span>';
-                            
-                            return `
-                                <div class="inline-flex items-center bg-slate-800/40 rounded-xl p-1 border border-slate-700/50 shadow-inner whitespace-nowrap">
-                                    <span class="finger-count-badge mr-1">
-                                        <i class="fas fa-fingerprint"></i> ${count}
-                                    </span>
-                                    <div class="flex items-center gap-1 border-l border-slate-700/50 pl-1">
+                    let fpData = null;
+                    try { fpData = JSON.parse(u.fingerprints || 'null'); } catch (e) { }
+                    const count = fpData && typeof fpData === 'object' && fpData.count !== undefined
+                        ? fpData.count
+                        : (Array.isArray(fpData) ? fpData.length : 0);
+
+                    if (count === 0) return '<span class="text-slate-600 italic text-xs">No fingerprints</span>';
+
+                    return `
+                                <div class="inline-flex items-center bg-slate-800/40 rounded-xl p-1 border border-slate-700/50 shadow-inner whitespace-nowrap gap-1">
+                                    ${(fpData && Array.isArray(fpData.indices) ? fpData.indices : []).map(f => `
+                                        <button class="finger-count-badge cursor-pointer hover:scale-110 transition-transform bg-transparent border-none p-0 flex items-center outline-none" 
+                                            onclick="app.deleteFingerDirect(${u.uid}, '${u.user_id}', ${u.device_id}, ${f})" 
+                                            title="Delete Finger ${f}">
+                                            <i class="fas fa-fingerprint"></i> <span class="ml-1">${f}</span>
+                                        </button>
+                                    `).join('')}
+                                    
+                                    <div class="border-l border-slate-700/50 pl-1 ml-1 flex items-center">
                                         <button class="btn btn-xs btn-red" onclick="app.deleteAllFingers(${u.uid}, '${u.user_id}', ${u.device_id})" title="Clear All Data">
                                             <i class="fas fa-eraser"></i>
                                         </button>
-                                        <select class="finger-select" onchange="app.deleteFingerBySelect(this, ${u.uid}, '${u.user_id}', ${u.device_id})" title="Delete specific slot">
-                                            <option value="">Slot...</option>
-                                            ${[0,1,2,3,4,5,6,7,8,9].map(f => `<option value="${f}">Finger ${f}</option>`).join('')}
-                                        </select>
                                     </div>
                                 </div>
                             `;
-                        })()}
+                })()}
                     </td>
                     <td class="p-3 border-b border-slate-700">
                         <span class="status-badge online">Device ${u.device_id}</span>
@@ -144,18 +145,18 @@ const app = {
         const userId = document.getElementById('user-id').value;
         const devId = document.getElementById('user-target-device').value;
         const role = document.getElementById('user-role').value;
-        
+
         const dev = this.devices.find(d => d.id == devId);
         if (!dev) return;
 
         this.showNotification('Saving user to device...', 'info');
-        const res = await window.electronAPI.invoke('create-user', { 
-            ip: dev.ip, 
-            ports: [dev.port1, dev.port2], 
-            uid: userId, 
-            userId, 
-            name, 
-            role: parseInt(role) 
+        const res = await window.electronAPI.invoke('create-user', {
+            ip: dev.ip,
+            ports: [dev.port1, dev.port2],
+            uid: userId,
+            userId,
+            name,
+            role: parseInt(role)
         });
 
         if (res.success) {
@@ -237,12 +238,8 @@ const app = {
         }
     },
 
-    async deleteFingerBySelect(selectEl, uid, userId, devId) {
-        const fingerIndex = selectEl.value;
-        if (!fingerIndex) return;
-        
+    async deleteFingerDirect(uid, userId, devId, fingerIndex) {
         if (!confirm(`Delete Finger ${fingerIndex} for user ${userId}?`)) {
-            selectEl.value = "";
             return;
         }
 
@@ -257,7 +254,6 @@ const app = {
                 this.showNotification('Failed: ' + res.error, 'error');
             }
         }
-        selectEl.value = "";
     },
 
     async deleteUser(uid, userId, devId) {
@@ -378,9 +374,9 @@ const app = {
         const report = await window.electronAPI.invoke('get-late-report', { date, startTime, endTime });
 
         tbody.innerHTML = report.map(r => {
-            const statusClass = r.status === 'Late' ? 'text-red-500 font-bold' : 
-                               (r.status === 'On Time' ? 'text-green-500 font-bold' : 'text-gray-400');
-            
+            const statusClass = r.status === 'Late' ? 'text-red-500 font-bold' :
+                (r.status === 'On Time' ? 'text-green-500 font-bold' : 'text-gray-400');
+
             return `
                 <tr class="hover:bg-slate-800/50 transition-colors">
                     <td class="p-3 border-b border-slate-700">

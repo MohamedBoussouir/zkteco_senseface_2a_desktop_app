@@ -133,61 +133,59 @@ function setupIpcHandlers(mainWindow) {
     });
 
     ipcMain.handle('get-users-fingerprints', async (event, { ip, ports, users }) => {
-        const crypto = require('crypto');
         return await withLock(ip, ports, async (zk) => {
             const device = await db('devices').where('ip', ip).first();
             if (!device) return { success: false, error: 'Device not found' };
 
-            console.log(`[Sync-Bio] Starting UNIQUE-HASH sync (Strict Mode) for ${users.length} users...`);
+            console.log(`[Sync-Bio] Starting FAST BULK sync for ${users.length} users...`);
             try { await zk.disableDevice(); } catch (e) {}
 
             let results = [];
+            const usersMap = {};
             for (const u of users) {
-                const nUid = parseInt(u.uid);
-                console.log(`[Sync-Bio] Scanning User ${u.user_id} (UID:${nUid})...`);
+                usersMap[u.uid] = { ...u, fpCount: 0, fpIndices: [] };
+            }
 
-                let hashes = new Map();
-                
-                for (let round = 0; round < 2; round++) {
-                    for (let slot = 0; slot <= 9; slot++) {
-                        const buf = Buffer.alloc(3);
-                        buf.writeUInt16LE(nUid, 0);
-                        buf.writeUInt8(slot, 2);
+            try {
+                const reqData = Buffer.from([0x01, 0x07, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+                const fpRes = await zk.zklibTcp.readWithBuffer(reqData);
+                const data = fpRes.data;
+
+                if (data && data.length >= 4) {
+                    let offset = 4;
+                    while (offset < data.length) {
+                        const entrySize = data.readUInt16LE(offset);
+                        if (entrySize === 0) break;
                         
-                        try {
-                            const rawRes = await zk.executeCmd(9, buf).catch(e => null); // نركز على CMD 9 لأنه الأدق
-                            const res = rawRes?.data || rawRes;
-                            
-                            if (res && res.length > 200) { // البصمة الحقيقية عادة > 200 بايت
-                                const code = res.readUInt16LE(0);
-                                if (code === 1501) {
-                                    const templateData = res.slice(12);
-                                    
-                                    // فلتر إضافي: التأكد من أن البصمة ليست كلها أصفار أو بيانات متكررة
-                                    let nonZeroCount = 0;
-                                    for(let i=0; i<100; i++) if(templateData[i] !== 0) nonZeroCount++;
-                                    
-                                    if (nonZeroCount > 10) { // إذا وجدنا بيانات فعلية
-                                        const hash = crypto.createHash('md5').update(templateData).digest('hex');
-                                        if (!hashes.has(hash)) {
-                                            hashes.set(hash, true);
-                                            console.log(`    -> ✅ Valid Unique Finger Found (Hash: ${hash.slice(0,8)})`);
-                                        }
-                                    }
-                                }
+                        const userSn = data.readUInt16LE(offset + 2);
+                        const fingerIndex = data.readUInt8(offset + 4); // <-- هذا هو السطر الذي نسيته سابقاً وتسبب في الخطأ
+                        const flag = data.readUInt8(offset + 5);
+                        
+                        // flag 1 = Valid, 3 = Duress
+                        if ((flag === 1 || flag === 3) && usersMap[userSn]) {
+                            usersMap[userSn].fpCount++;
+                            if (!usersMap[userSn].fpIndices.includes(fingerIndex)) {
+                                usersMap[userSn].fpIndices.push(fingerIndex);
                             }
-                        } catch (e) {}
+                        }
+                        
+                        offset += entrySize;
                     }
                 }
+            } catch (e) {
+                console.error('[Sync-Bio] Error during bulk fetch:', e.message);
+            }
 
-                const finalCount = hashes.size;
-                console.log(`  -> [RESULT] User ${u.user_id}: ${finalCount} real fingerprints.`);
+            for (const u of users) {
+                const finalCount = usersMap[u.uid].fpCount;
+                const indices = usersMap[u.uid].fpIndices;
+                console.log(`  -> [RESULT] User ${u.user_id}: ${finalCount} real fingerprints. Indices: ${indices.join(',')}`);
                 
                 await db('users')
                     .where({ user_id: u.user_id, device_id: device.id })
-                    .update({ fingerprints: JSON.stringify({ count: finalCount }) });
+                    .update({ fingerprints: JSON.stringify({ count: finalCount, indices }) });
                 
-                results.push({ user_id: u.user_id, count: finalCount });
+                results.push({ user_id: u.user_id, count: finalCount, indices });
             }
 
             try { await zk.enableDevice(); } catch (e) {}
