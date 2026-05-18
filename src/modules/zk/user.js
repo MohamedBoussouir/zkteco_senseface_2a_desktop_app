@@ -91,15 +91,7 @@ async function deleteFinger(ip, ports, uid, userId, fingerIndex) {
             await zk.enableDevice();
         } catch (e) { }
 
-        const device = await db('devices').where('ip', ip).first();
-        if (device) {
-            const user = await db('users').where({ user_id: userId, device_id: device.id }).first();
-            if (user) {
-                let fingers = JSON.parse(user.fingerprints || '[]');
-                fingers = fingers.filter(f => f !== parseInt(fingerIndex));
-                await db('users').where({ id: user.id }).update({ fingerprints: JSON.stringify(fingers) });
-            }
-        }
+        // Database update is handled in ipc-handlers.js
         return { success: true };
     });
 }
@@ -133,13 +125,7 @@ async function deleteAllFingers(ip, ports, uid, userId) {
             await zk.enableDevice();
         } catch (e) {}
 
-        // إعادة تعيين العداد في قاعدة البيانات
-        const device = await db('devices').where('ip', ip).first();
-        if (device) {
-            await db('users')
-                .where({ user_id: userId, device_id: device.id })
-                .update({ fingerprints: JSON.stringify({ count: 0 }) });
-        }
+        // Database update is handled in ipc-handlers.js
         console.log(`[Delete-All] Done.`);
         return { success: true };
     });

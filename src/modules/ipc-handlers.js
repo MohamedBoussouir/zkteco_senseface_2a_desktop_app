@@ -194,11 +194,37 @@ function setupIpcHandlers(mainWindow) {
     });
 
     ipcMain.handle('delete-user-fingerprint', async (event, { ip, ports, uid, userId, fingerIndex }) => {
-        return deleteFinger(ip, ports, uid, userId, fingerIndex);
+        const res = await deleteFinger(ip, ports, uid, userId, fingerIndex);
+        if (res.success) {
+            const device = await db('devices').where('ip', ip).first();
+            if (device) {
+                const user = await db('users').where({ user_id: userId, device_id: device.id }).first();
+                if (user && user.fingerprints) {
+                    try {
+                        const fpData = JSON.parse(user.fingerprints);
+                        if (fpData && Array.isArray(fpData.indices)) {
+                            fpData.indices = fpData.indices.filter(i => i.toString() !== fingerIndex.toString());
+                            fpData.count = fpData.indices.length;
+                            await db('users').where('id', user.id).update({ fingerprints: JSON.stringify(fpData) });
+                        }
+                    } catch(e) {}
+                }
+            }
+        }
+        return res;
     });
 
     ipcMain.handle('delete-all-fingerprints', async (event, { ip, ports, uid, userId }) => {
-        return deleteAllFingers(ip, ports, uid, userId);
+        const res = await deleteAllFingers(ip, ports, uid, userId);
+        if (res.success) {
+            const device = await db('devices').where('ip', ip).first();
+            if (device) {
+                await db('users')
+                    .where({ user_id: userId, device_id: device.id })
+                    .update({ fingerprints: JSON.stringify({ count: 0, indices: [] }) });
+            }
+        }
+        return res;
     });
 
     // Logs

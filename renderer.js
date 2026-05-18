@@ -313,6 +313,8 @@ const app = {
     },
 
     showNotification(msg, type = 'success') {
+        document.querySelectorAll('.notification-toast').forEach(t => t.remove());
+        
         const toast = document.createElement('div');
         toast.className = `notification-toast ${type}`;
         toast.innerHTML = `
@@ -320,7 +322,7 @@ const app = {
             <span>${msg}</span>
         `;
         document.body.appendChild(toast);
-        setTimeout(() => toast.remove(), 4000);
+        setTimeout(() => toast?.remove(), 4000);
     },
 
     async testConn(ip, ports) {
