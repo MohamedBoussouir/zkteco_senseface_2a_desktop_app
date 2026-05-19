@@ -24,6 +24,9 @@
             <a href="#" class="nav-item" data-page="users">
                 <i class="fas fa-user-group"></i> Manage Users
             </a>
+            <a href="#" class="nav-item" data-page="schedules">
+                <i class="fas fa-calendar-alt"></i> Shifts & Schedules
+            </a>
             <a href="#" class="nav-item" data-page="logs">
                 <i class="fas fa-history"></i> Attendance Logs
             </a>
@@ -224,6 +227,114 @@
                             <!-- Data injection -->
                         </tbody>
                     </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Shifts & Schedules Page -->
+        <div id="schedules-page" class="page">
+            <div class="stats-grid" style="grid-template-columns: 1fr 2fr;">
+                <!-- Shift Definitions Card -->
+                <div class="card" style="margin-bottom: 0;">
+                    <div class="section-header" style="margin-bottom: 15px;">
+                        <h2><i class="fas fa-clock"></i> Define Shifts (الورديات)</h2>
+                    </div>
+                    <form id="add-shift-form" style="margin-bottom: 25px;">
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <label>Shift Name (اسم الوردية)</label>
+                            <input type="text" id="shift-name" placeholder="Morning Shift / وردية صباحية" required style="padding: 10px 12px; font-size: 0.9rem;">
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label>Start Time (البداية)</label>
+                                <input type="time" id="shift-start" required style="padding: 10px 12px; font-size: 0.9rem;">
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label>End Time (النهاية)</label>
+                                <input type="time" id="shift-end" required style="padding: 10px 12px; font-size: 0.9rem;">
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-full" style="padding: 10px;">
+                            <i class="fas fa-plus"></i> Save Shift
+                        </button>
+                    </form>
+                    
+                    <div>
+                        <h4 style="margin-bottom: 10px; font-size: 0.9rem; color: var(--text-muted);">Defined Shifts:</h4>
+                        <div id="shifts-list-container" style="display: flex; flex-direction: column; gap: 8px; max-height: 200px; overflow-y: auto; background: rgba(0, 0, 0, 0.15); border: 1px solid var(--glass-border); border-radius: 12px; padding: 10px;">
+                            <!-- Dynamically injected shifts -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Bulk Schedule Assignment Card -->
+                <div class="card" style="margin-bottom: 0;">
+                    <div class="section-header" style="margin-bottom: 15px;">
+                        <h2><i class="fas fa-calendar-check"></i> Assign Schedules (جدولة الموظفين)</h2>
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                        <!-- Quick Daily Scheduler Table -->
+                        <div>
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 10px;">
+                                <h4 style="font-size: 0.85rem; color: var(--text-muted);">Daily Schedules for:</h4>
+                                <input type="date" id="scheduler-view-date" style="width: auto; padding: 6px 12px; border-radius: 8px; font-size: 0.85rem; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: white;">
+                            </div>
+                            
+                            <div class="table-container" style="max-height: 380px; overflow-y: auto; background: rgba(0, 0, 0, 0.15); border: 1px solid var(--glass-border); border-radius: 12px; padding: 10px;">
+                                <table id="daily-scheduler-table" style="width: 100%;">
+                                    <thead>
+                                        <tr>
+                                            <th style="font-size: 0.75rem; padding: 10px 5px;">Employee</th>
+                                            <th style="font-size: 0.75rem; padding: 10px 5px; width: 60px; text-align: center;">ID</th>
+                                            <th style="font-size: 0.75rem; padding: 10px 5px; text-align: right;">Assigned Shift</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <!-- Dynamically injected employee list and quick shift selector dropdowns -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        
+                        <!-- Bulk Assignment Form -->
+                        <div style="background: rgba(0, 0, 0, 0.25); border: 1px solid var(--glass-border); padding: 20px; border-radius: 16px;">
+                            <h4 style="margin-bottom: 15px; font-size: 0.95rem; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
+                                <i class="fas fa-layer-group text-purple-400"></i> Bulk Assign (جدولة جماعية)
+                            </h4>
+                            
+                            <div class="form-group" style="margin-bottom: 15px;">
+                                <label style="font-size: 0.8rem; margin-bottom: 5px;">Date Range (الفترة الزمنية)</label>
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                                    <input type="date" id="bulk-start-date" required style="padding: 8px; font-size: 0.8rem;">
+                                    <input type="date" id="bulk-end-date" required style="padding: 8px; font-size: 0.8rem;">
+                                </div>
+                            </div>
+                            
+                            <div class="form-group" style="margin-bottom: 15px;">
+                                <label style="font-size: 0.8rem; margin-bottom: 5px;">Target Employees (الموظفون المستهدفون)</label>
+                                <div style="display: flex; gap: 8px; margin-bottom: 5px;">
+                                    <button type="button" class="btn btn-secondary" style="font-size: 0.7rem; padding: 3px 8px; border-radius: 6px; margin: 0;" onclick="app.selectAllBulkEmployees(true)">All</button>
+                                    <button type="button" class="btn btn-secondary" style="font-size: 0.7rem; padding: 3px 8px; border-radius: 6px; margin: 0;" onclick="app.selectAllBulkEmployees(false)">None</button>
+                                </div>
+                                <div id="bulk-employees-list" style="max-height: 120px; overflow-y: auto; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--glass-border); border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 5px;">
+                                    <!-- Dynamic checkbox list of employees -->
+                                </div>
+                            </div>
+                            
+                            <div class="form-group" style="margin-bottom: 20px;">
+                                <label style="font-size: 0.8rem; margin-bottom: 5px;">Select Work Shift / Off Day (الوردية / الإجازة)</label>
+                                <select id="bulk-shift-select" style="background: rgba(0, 0, 0, 0.3); border: 1px solid var(--glass-border); color: white; padding: 8px 12px; border-radius: 8px; font-size: 0.85rem;">
+                                    <option value="off">Off Day / Weekend (إجازة أسبوعية)</option>
+                                    <!-- Dynamic options injected -->
+                                </select>
+                            </div>
+                            
+                            <button type="button" class="btn btn-primary btn-full" onclick="app.applyBulkSchedule()" style="padding: 10px;">
+                                <i class="fas fa-check"></i> Apply Bulk Schedule
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

@@ -579,6 +579,8 @@ function setupIpcHandlers(mainWindow) {
     ipcMain.handle('get-late-report', async (event, { date, startTime, endTime }) => {
         const users = await db('users').select('user_id', 'name');
         const logs = await db('attendance').where('timestamp', 'like', `${date}%`).select('*');
+        const schedules = await db('schedules').where('date', date).select('*');
+        const shifts = await db('shifts').select('*');
 
         const getMinutes = (ts) => {
             const d = new Date(ts);
@@ -589,10 +591,73 @@ function setupIpcHandlers(mainWindow) {
             return h * 60 + m;
         };
 
-        return users.map(user => {
+        const results = [];
+        for (const user of users) {
             const userLogs = logs.filter(l => l.user_id === user.user_id);
+            const userSchedule = schedules.find(s => s.user_id === user.user_id);
+
+            let expectedStart = startTime;
+            let expectedEnd = endTime;
+            let isOffDay = false;
+            let shiftName = '';
+
+            if (userSchedule) {
+                if (userSchedule.is_off_day) {
+                    isOffDay = true;
+                } else if (userSchedule.shift_id) {
+                    const shift = shifts.find(s => s.id === userSchedule.shift_id);
+                    if (shift) {
+                        expectedStart = shift.start_time;
+                        expectedEnd = shift.end_time;
+                        shiftName = shift.name;
+                    }
+                }
+            }
+
+            if (isOffDay) {
+                if (userLogs.length === 0) {
+                    results.push({
+                        name: user.name,
+                        user_id: user.user_id,
+                        first: '--',
+                        last: '--',
+                        worked: '--',
+                        delay: '--',
+                        expected: 'Off Day (إجازة)',
+                        status: 'Off Day'
+                    });
+                } else {
+                    userLogs.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                    const first = userLogs[0].timestamp;
+                    const last = userLogs[userLogs.length - 1].timestamp;
+                    const diffMs = new Date(last) - new Date(first);
+                    const hoursWorked = (diffMs / (1000 * 60 * 60)).toFixed(2);
+                    results.push({
+                        name: user.name,
+                        user_id: user.user_id,
+                        first: new Date(first).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                        last: new Date(last).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                        worked: `${hoursWorked} hrs`,
+                        delay: '--',
+                        expected: 'Off Day (عمل في الإجازة)',
+                        status: 'On Time'
+                    });
+                }
+                continue;
+            }
+
             if (userLogs.length === 0) {
-                return { name: user.name, user_id: user.user_id, first: '--', last: '--', worked: '--', delay: '--', status: 'Absent' };
+                results.push({
+                    name: user.name,
+                    user_id: user.user_id,
+                    first: '--',
+                    last: '--',
+                    worked: '--',
+                    delay: '--',
+                    expected: `${expectedStart} - ${expectedEnd}`,
+                    status: 'Absent'
+                });
+                continue;
             }
 
             userLogs.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
@@ -600,7 +665,7 @@ function setupIpcHandlers(mainWindow) {
             const last = userLogs[userLogs.length - 1].timestamp;
 
             const firstMin = getMinutes(first);
-            const startMin = parseTimeStr(startTime);
+            const startMin = parseTimeStr(expectedStart);
             const diffMs = new Date(last) - new Date(first);
             const hoursWorked = (diffMs / (1000 * 60 * 60)).toFixed(2);
 
@@ -611,16 +676,56 @@ function setupIpcHandlers(mainWindow) {
                 status = 'Late';
             }
 
-            return {
+            results.push({
                 name: user.name,
                 user_id: user.user_id,
                 first: new Date(first).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                 last: new Date(last).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                 worked: `${hoursWorked} hrs`,
                 delay,
+                expected: `${expectedStart} - ${expectedEnd}${shiftName ? ` (${shiftName})` : ''}`,
                 status
-            };
-        });
+            });
+        }
+        return results;
+    });
+
+    // Shifts & Schedules IPC Handlers
+    ipcMain.handle('get-shifts', async () => {
+        return db('shifts').select('*');
+    });
+
+    ipcMain.handle('add-shift', async (event, shift) => {
+        const [id] = await db('shifts').insert(shift);
+        return { success: true, id };
+    });
+
+    ipcMain.handle('delete-shift', async (event, id) => {
+        await db('shifts').where('id', id).delete();
+        return { success: true };
+    });
+
+    ipcMain.handle('get-schedules', async (event, { date }) => {
+        return db('schedules').where('date', date).select('*');
+    });
+
+    ipcMain.handle('save-schedule', async (event, schedule) => {
+        await db('schedules').insert(schedule).onConflict(['user_id', 'date']).merge();
+        return { success: true };
+    });
+
+    ipcMain.handle('bulk-save-schedules', async (event, { userIds, dates, shiftId, isOffDay }) => {
+        for (const userId of userIds) {
+            for (const date of dates) {
+                await db('schedules').insert({
+                    user_id: userId.toString(),
+                    date,
+                    shift_id: isOffDay ? null : shiftId,
+                    is_off_day: isOffDay ? 1 : 0
+                }).onConflict(['user_id', 'date']).merge();
+            }
+        }
+        return { success: true };
     });
 
     ipcMain.handle('get-calc-mode', async () => {

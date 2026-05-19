@@ -457,3 +457,18 @@ input:focus { border-color: var(--accent-primary); background: rgba(0,0,0,0.3); 
     50% { transform: scale(1.05); opacity: 0.8; }
     100% { transform: scale(1); opacity: 1; }
 }
+
+/* Scheduling Specific Overrides */
+#daily-scheduler-table td select option {
+    background: #101223;
+    color: white;
+}
+
+#bulk-shift-select option {
+    background: #101223;
+    color: white;
+}
+
+.space-y-2 > * + * {
+    margin-top: 0.5rem;
+}

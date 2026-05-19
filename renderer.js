@@ -19,6 +19,28 @@ const app = {
             };
         }
 
+        // Handle Shift Form Submission
+        const shiftForm = document.getElementById('add-shift-form');
+        if (shiftForm) {
+            shiftForm.onsubmit = async (e) => {
+                e.preventDefault();
+                const name = document.getElementById('shift-name').value;
+                const start = document.getElementById('shift-start').value;
+                const end = document.getElementById('shift-end').value;
+                
+                this.showNotification('Creating shift...', 'info');
+                const res = await window.electronAPI.invoke('add-shift', { name, start_time: start, end_time: end });
+                if (res.success) {
+                    this.showNotification('Shift created successfully');
+                    document.getElementById('add-shift-form').reset();
+                    await this.loadShifts();
+                    await this.renderDailyScheduler();
+                } else {
+                    this.showNotification('Failed: ' + res.error, 'error');
+                }
+            };
+        }
+
         // Listen to license validation errors from main process
         window.electronAPI.on('license-error', async (msg) => {
             const res = await window.electronAPI.invoke('get-machine-id');
@@ -153,6 +175,7 @@ const app = {
         const pageTitles = {
             dashboard: { title: trans.dashboard, subtitle: trans.subtitle_dashboard },
             users: { title: trans.users, subtitle: trans.subtitle_users },
+            schedules: { title: trans.schedules, subtitle: trans.subtitle_schedules },
             logs: { title: trans.logs, subtitle: trans.subtitle_logs },
             devices: { title: trans.devices, subtitle: trans.subtitle_devices },
             reports: { title: trans.reports, subtitle: trans.subtitle_reports },
@@ -168,6 +191,7 @@ const app = {
         }
 
         if (pageId === 'users') this.loadUsers();
+        if (pageId === 'schedules') this.loadSchedulesTab();
         if (pageId === 'logs') this.loadLogs();
         if (pageId === 'dashboard') this.loadDashboardStats();
         if (pageId === 'settings') this.loadStrategyMode();
@@ -897,7 +921,8 @@ const app = {
 
         tbody.innerHTML = reportData.map(r => {
             const statusClass = r.status === 'Late' ? 'text-red-500 font-bold' :
-                (r.status === 'On Time' ? 'text-green-500 font-bold' : 'text-gray-400');
+                (r.status === 'On Time' ? 'text-green-500 font-bold' : 
+                 (r.status === 'Off Day' ? 'text-blue-400 font-semibold' : 'text-gray-400'));
 
             return `
                 <tr class="hover:bg-slate-800/50 transition-colors">
@@ -907,7 +932,7 @@ const app = {
                     </td>
                     <td class="p-3 border-b border-slate-700">${r.first}</td>
                     <td class="p-3 border-b border-slate-700">${r.last}</td>
-                    <td class="p-3 border-b border-slate-700 text-slate-400">${startTime}</td>
+                    <td class="p-3 border-b border-slate-700 text-slate-400 text-xs">${r.expected || startTime}</td>
                     <td class="p-3 border-b border-slate-700 ${r.status === 'Late' ? 'text-orange-400' : ''}">${r.delay}</td>
                     <td class="p-3 border-b border-slate-700 font-mono">${r.worked}</td>
                     <td class="p-3 border-b border-slate-700">
@@ -947,6 +972,8 @@ const app = {
             subtitle_dashboard: "Welcome back, manager.",
             users: "Manage Employees",
             subtitle_users: "Create, update and enroll employee fingerprints.",
+            schedules: "Shifts & Schedules",
+            subtitle_schedules: "Define working shifts and assign daily or weekly schedules.",
             logs: "Attendance Logs",
             subtitle_logs: "View, search and sync biometric check-in history.",
             devices: "Manage Devices",
@@ -963,6 +990,8 @@ const app = {
             subtitle_dashboard: "Bon retour, responsable.",
             users: "Gérer les Employés",
             subtitle_users: "Créer, mettre à jour et enregistrer les empreintes digitales.",
+            schedules: "Horaires & Shifts",
+            subtitle_schedules: "Définir les quarts de travail et planifier les horaires.",
             logs: "Journaux de Présence",
             subtitle_logs: "Consulter, rechercher et synchroniser l'historique.",
             devices: "Gérer les Appareils",
@@ -1039,6 +1068,244 @@ const app = {
             const errorMsg = document.getElementById('activation-error-msg');
             if (errorMsg) errorMsg.innerText = res.message || 'Activation failed.';
             this.showNotification(res.message || 'Activation failed.', 'error');
+        }
+    },
+
+    // ==========================================
+    // SHIFTS & SCHEDULING SYSTEM METHODS
+    // ==========================================
+    shifts: [],
+    
+    async loadSchedulesTab() {
+        // Set today's date for daily schedule view if empty
+        const viewDateEl = document.getElementById('scheduler-view-date');
+        if (viewDateEl && !viewDateEl.value) {
+            viewDateEl.value = new Date().toISOString().split('T')[0];
+        }
+        
+        // Set default dates for bulk schedule
+        const bulkStart = document.getElementById('bulk-start-date');
+        const bulkEnd = document.getElementById('bulk-end-date');
+        if (bulkStart && !bulkStart.value) {
+            bulkStart.value = new Date().toISOString().split('T')[0];
+        }
+        if (bulkEnd && !bulkEnd.value) {
+            // Default bulk range to 7 days
+            const d = new Date();
+            d.setDate(d.getDate() + 6);
+            bulkEnd.value = d.toISOString().split('T')[0];
+        }
+
+        await this.loadShifts();
+        await this.renderDailyScheduler();
+        await this.loadBulkEmployeesList();
+        
+        // Bind onchange event for date picker
+        if (viewDateEl && !viewDateEl.dataset.bound) {
+            viewDateEl.onchange = () => this.renderDailyScheduler();
+            viewDateEl.dataset.bound = "true";
+        }
+    },
+
+    async loadShifts() {
+        try {
+            this.shifts = await window.electronAPI.invoke('get-shifts');
+            
+            // Render Shifts List
+            const listContainer = document.getElementById('shifts-list-container');
+            if (listContainer) {
+                if (this.shifts.length === 0) {
+                    listContainer.innerHTML = '<p class="text-xs text-slate-500 italic text-center p-3">No shifts defined. Add one above.</p>';
+                } else {
+                    listContainer.innerHTML = this.shifts.map(s => `
+                        <div class="flex justify-between items-center bg-slate-800/40 p-2 rounded-lg border border-slate-700/50">
+                            <div>
+                                <span class="font-medium text-sm text-slate-200">${s.name}</span>
+                                <div class="text-xs text-slate-400 font-mono">${s.start_time} - ${s.end_time}</div>
+                            </div>
+                            <button class="btn btn-xs btn-red" onclick="app.deleteShift(${s.id})" title="Delete Shift" style="padding: 4px 8px; border-radius: 6px;">
+                                <i class="fas fa-trash-alt"></i>
+                            </button>
+                        </div>
+                    `).join('');
+                }
+            }
+
+            // Update Bulk Shift Select Dropdown
+            const bulkSelect = document.getElementById('bulk-shift-select');
+            if (bulkSelect) {
+                bulkSelect.innerHTML = '<option value="off">Off Day / Weekend (إجازة أسبوعية) 😴</option>' + 
+                    this.shifts.map(s => `<option value="${s.id}">${s.name} (${s.start_time} - ${s.end_time}) 🕒</option>`).join('');
+            }
+        } catch (e) {
+            console.error(e);
+        }
+    },
+
+    async deleteShift(id) {
+        if (!confirm('Are you sure you want to delete this shift? This will clear schedules using it.')) return;
+        this.showNotification('Deleting shift...', 'info');
+        const res = await window.electronAPI.invoke('delete-shift', id);
+        if (res.success) {
+            this.showNotification('Shift deleted successfully');
+            await this.loadShifts();
+            await this.renderDailyScheduler();
+        } else {
+            this.showNotification('Failed: ' + res.error, 'error');
+        }
+    },
+
+    async renderDailyScheduler() {
+        const date = document.getElementById('scheduler-view-date').value;
+        if (!date) return;
+
+        const tbody = document.querySelector('#daily-scheduler-table tbody');
+        if (!tbody) return;
+
+        tbody.innerHTML = '<tr><td colspan="3" class="text-center p-3 text-xs"><i class="fas fa-spinner fa-spin mr-1"></i> Loading...</td></tr>';
+
+        try {
+            const users = await window.electronAPI.invoke('get-local-users');
+            const dailySchedules = await window.electronAPI.invoke('get-schedules', { date });
+
+            if (users.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3" class="text-center p-3 text-slate-500 text-xs">No employees registered yet.</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = users.map(u => {
+                const schedule = dailySchedules.find(s => s.user_id == u.user_id);
+                
+                // Active option check
+                const isOffSelected = schedule && schedule.is_off_day ? 'selected' : '';
+                const isNoneSelected = !schedule ? 'selected' : '';
+
+                const optionsHtml = this.shifts.map(s => {
+                    const isSelected = schedule && !schedule.is_off_day && schedule.shift_id == s.id ? 'selected' : '';
+                    return `<option value="${s.id}" ${isSelected}>${s.name} (${s.start_time} - ${s.end_time})</option>`;
+                }).join('');
+
+                return `
+                    <tr class="hover:bg-slate-800/30">
+                        <td class="p-2 border-b border-slate-700 font-medium text-xs text-left" style="padding: 10px 5px;">${u.name}</td>
+                        <td class="p-2 border-b border-slate-700 text-slate-400 text-xs font-mono text-center" style="padding: 10px 5px;">${u.user_id}</td>
+                        <td class="p-2 border-b border-slate-700 text-right" style="padding: 10px 5px;">
+                            <select onchange="app.saveSingleSchedule('${u.user_id}', '${date}', this.value)" 
+                                style="background: rgba(0,0,0,0.4); border: 1px solid var(--glass-border); color: white; padding: 4px 8px; border-radius: 6px; font-size: 0.75rem; width: auto; max-width: 180px; outline: none; cursor: pointer;">
+                                <option value="none" ${isNoneSelected}>Default (08:00 - 17:00) ⚙️</option>
+                                <option value="off" ${isOffSelected}>Off Day / الإجازة 😴</option>
+                                ${optionsHtml}
+                            </select>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        } catch (e) {
+            console.error(e);
+            tbody.innerHTML = '<tr><td colspan="3" class="text-center p-3 text-red-400 text-xs">Error loading scheduler</td></tr>';
+        }
+    },
+
+    async saveSingleSchedule(userId, date, val) {
+        try {
+            const isOffDay = val === 'off' ? 1 : 0;
+            const shiftId = (val === 'none' || val === 'off') ? null : parseInt(val);
+
+            this.showNotification('Saving schedule...', 'info');
+            const res = await window.electronAPI.invoke('save-schedule', {
+                user_id: userId.toString(),
+                date,
+                shift_id: shiftId,
+                is_off_day: isOffDay
+            });
+
+            if (res.success) {
+                this.showNotification('Schedule updated successfully');
+            } else {
+                this.showNotification('Failed: ' + res.error, 'error');
+            }
+        } catch (e) {
+            console.error(e);
+            this.showNotification('Connection failed', 'error');
+        }
+    },
+
+    async loadBulkEmployeesList() {
+        const container = document.getElementById('bulk-employees-list');
+        if (!container) return;
+
+        try {
+            const users = await window.electronAPI.invoke('get-local-users');
+            if (users.length === 0) {
+                container.innerHTML = '<span class="text-xs text-slate-500 italic">No employees found.</span>';
+                return;
+            }
+
+            container.innerHTML = users.map(u => `
+                <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 3px; cursor: pointer; font-size: 0.75rem; color: #cbd5e1; justify-content: flex-start; text-align: left;">
+                    <input type="checkbox" class="bulk-employee-checkbox" value="${u.user_id}" style="width: auto; margin-right: 5px;">
+                    <span>${u.name} (ID: ${u.user_id})</span>
+                </label>
+            `).join('');
+        } catch (e) {
+            console.error(e);
+        }
+    },
+
+    selectAllBulkEmployees(val) {
+        document.querySelectorAll('.bulk-employee-checkbox').forEach(cb => {
+            cb.checked = val;
+        });
+    },
+
+    async applyBulkSchedule() {
+        const startDateVal = document.getElementById('bulk-start-date').value;
+        const endDateVal = document.getElementById('bulk-end-date').value;
+        const shiftVal = document.getElementById('bulk-shift-select').value;
+
+        if (!startDateVal || !endDateVal) {
+            this.showNotification('Please select both start and end dates', 'error');
+            return;
+        }
+
+        const selectedCheckboxes = document.querySelectorAll('.bulk-employee-checkbox:checked');
+        if (selectedCheckboxes.length === 0) {
+            this.showNotification('Please select at least one employee', 'error');
+            return;
+        }
+
+        const userIds = Array.from(selectedCheckboxes).map(cb => cb.value);
+
+        // Generate date array
+        const dates = [];
+        let curr = new Date(startDateVal);
+        const end = new Date(endDateVal);
+        while (curr <= end) {
+            dates.push(curr.toISOString().split('T')[0]);
+            curr.setDate(curr.getDate() + 1);
+        }
+
+        const isOffDay = shiftVal === 'off';
+        const shiftId = isOffDay ? null : parseInt(shiftVal);
+
+        this.showNotification(`Applying bulk schedule for ${userIds.length} employees...`, 'info');
+        try {
+            const res = await window.electronAPI.invoke('bulk-save-schedules', {
+                userIds,
+                dates,
+                shiftId,
+                isOffDay
+            });
+
+            if (res.success) {
+                this.showNotification('Bulk schedule applied successfully!', 'success');
+                await this.renderDailyScheduler();
+            } else {
+                this.showNotification('Failed: ' + res.error, 'error');
+            }
+        } catch (e) {
+            console.error(e);
+            this.showNotification('Connection failed', 'error');
         }
     }
 };

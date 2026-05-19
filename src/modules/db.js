@@ -78,6 +78,35 @@ async function initDb() {
         });
         await db('settings').insert({ key: 'calc_mode', value: 'calculated' });
     }
+
+    // Shifts Table
+    const hasShifts = await db.schema.hasTable('shifts');
+    if (!hasShifts) {
+        await db.schema.createTable('shifts', (table) => {
+            table.increments('id');
+            table.string('name');
+            table.string('start_time');
+            table.string('end_time');
+        });
+        // Insert default shifts
+        await db('shifts').insert([
+            { name: 'الوردية الصباحية (Morning Shift)', start_time: '08:00', end_time: '17:00' },
+            { name: 'الوردية المسائية (Evening Shift)', start_time: '16:00', end_time: '00:00' }
+        ]);
+    }
+
+    // Schedules Table
+    const hasSchedules = await db.schema.hasTable('schedules');
+    if (!hasSchedules) {
+        await db.schema.createTable('schedules', (table) => {
+            table.increments('id');
+            table.string('user_id');
+            table.string('date'); // YYYY-MM-DD
+            table.integer('shift_id').unsigned().references('id').inTable('shifts').onDelete('CASCADE');
+            table.integer('is_off_day').defaultTo(0);
+            table.unique(['user_id', 'date']);
+        });
+    }
 }
 
 module.exports = { db, initDb };
