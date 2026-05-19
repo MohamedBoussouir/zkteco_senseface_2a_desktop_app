@@ -12,6 +12,7 @@ function setupIpcHandlers(mainWindow) {
     // Licensing
     ipcMain.handle('verify-license', async () => licensing.verifyLicense());
     ipcMain.handle('get-machine-id', async () => ({ mid: licensing.getMachineId() }));
+    ipcMain.handle('save-license-key', async (event, key) => licensing.saveLicenseKey(key));
 
     // Devices
     ipcMain.handle('get-devices', async () => db('devices').select('*'));

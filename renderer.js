@@ -19,6 +19,19 @@ const app = {
             };
         }
 
+        // Listen to license validation errors from main process
+        window.electronAPI.on('license-error', async (msg) => {
+            const res = await window.electronAPI.invoke('get-machine-id');
+            const midInput = document.getElementById('activation-mid');
+            if (midInput) midInput.value = res.mid || 'UNKNOWN_MID';
+
+            const errorMsg = document.getElementById('activation-error-msg');
+            if (errorMsg) errorMsg.innerText = msg;
+
+            const modal = document.getElementById('activation-modal');
+            if (modal) modal.style.display = 'flex';
+        });
+
         // الفحص التلقائي للمستخدمين والبصمات عند الدخول
         setTimeout(async () => {
             if (this.devices.length > 0) {
@@ -998,6 +1011,35 @@ const app = {
     loadSavedLanguage() {
         const saved = localStorage.getItem('hs_lang') || 'en';
         this.changeLanguage(saved);
+    },
+
+    copyMachineId() {
+        const midInput = document.getElementById('activation-mid');
+        if (midInput) {
+            midInput.select();
+            document.execCommand('copy');
+            this.showNotification('Machine ID copied to clipboard!');
+        }
+    },
+
+    async submitActivationKey() {
+        const keyArea = document.getElementById('activation-key');
+        if (!keyArea || !keyArea.value.trim()) {
+            this.showNotification('Please enter a license key first!', 'error');
+            return;
+        }
+
+        const res = await window.electronAPI.invoke('save-license-key', keyArea.value.trim());
+        if (res.success) {
+            this.showNotification('Activation successful! Reloading application...', 'success');
+            setTimeout(() => {
+                window.location.reload();
+            }, 1500);
+        } else {
+            const errorMsg = document.getElementById('activation-error-msg');
+            if (errorMsg) errorMsg.innerText = res.message || 'Activation failed.';
+            this.showNotification(res.message || 'Activation failed.', 'error');
+        }
     }
 };
 

@@ -1,5 +1,4 @@
-const LicensingManager = require('./LicensingManager');
-const lm = new LicensingManager();
+const lm = require('../src/modules/licensing');
 
 // --- DEVELOPER TOOL: Run this to generate a license ---
 // Usage: node license_generator.js <machine_id> <days>

@@ -89,6 +89,36 @@ class LicensingManager {
             return { valid: false, message: "فشل في قراءة بيانات الترخيص." };
         }
     }
+
+    saveLicenseKey(key) {
+        try {
+            const decrypted = this.decrypt(key.trim());
+            if (!decrypted) return { success: false, message: "مفتاح الترخيص غير صالح للتشفير المعتمد." };
+
+            const { mid, expiry } = JSON.parse(decrypted);
+            const currentMid = this.getMachineId();
+            const now = new Date();
+            const expiryDate = new Date(expiry);
+
+            if (mid !== currentMid) {
+                return { success: false, message: "هذا الترخيص مخصص لجهاز آخر ومختلف." };
+            }
+
+            if (now > expiryDate) {
+                return { success: false, message: `انتهت صلاحية هذا الترخيص في ${expiryDate.toLocaleDateString()}.` };
+            }
+
+            fs.writeFileSync(this.licensePath, key.trim(), 'utf8');
+            return { success: true };
+        } catch (e) {
+            return { success: false, message: "بيانات مفتاح الترخيص تالفة أو غير صالحة." };
+        }
+    }
+
+    generateLicense(mid, expiry) {
+        const payload = JSON.stringify({ mid, expiry });
+        return this.encrypt(payload);
+    }
 }
 
 const licensing = new LicensingManager();

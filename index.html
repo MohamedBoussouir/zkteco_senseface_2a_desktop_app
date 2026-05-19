@@ -515,6 +515,35 @@
         </div>
     </div>
 
+    <!-- License Activation Modal -->
+    <div id="activation-modal" class="modal" style="display: none; align-items: center; justify-content: center; z-index: 9999;">
+        <div class="modal-content" style="width: 550px; text-align: center; background: #101223; border: 1px solid var(--glass-border); padding: 40px; border-radius: 28px; box-shadow: var(--shadow-lg);">
+            <div class="icon-box" style="margin: 0 auto 20px auto; background: rgba(99, 102, 241, 0.1); color: #6366f1; width: 80px; height: 80px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 2.2rem;">
+                <i class="fas fa-key"></i>
+            </div>
+            <h2 style="font-weight: 700; font-size: 1.6rem; margin-bottom: 10px;">Activate Application</h2>
+            <p id="activation-error-msg" style="font-size: 0.9rem; color: #ef4444; font-weight: 600; margin-bottom: 15px;"></p>
+            <p class="text-slate-400 mb-6" style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 20px;">Copy your Device Machine ID and send it to the developer to receive your activation key.</p>
+            
+            <div class="form-group mb-4" style="text-align: left; margin-bottom: 20px;">
+                <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 8px;">Your Device Machine ID</label>
+                <div style="display: flex; gap: 10px;">
+                    <input type="text" id="activation-mid" readonly style="font-family: monospace; background: rgba(0, 0, 0, 0.3); color: var(--text-main); font-size: 0.85rem; border: 1px solid var(--border-color); padding: 12px; border-radius: 12px; flex: 1; outline: none;">
+                    <button class="btn btn-secondary" onclick="app.copyMachineId()" style="padding: 0 15px; border-radius: 12px; cursor: pointer; transition: all 0.3s;"><i class="fas fa-copy"></i></button>
+                </div>
+            </div>
+
+            <div class="form-group mb-6" style="text-align: left; margin-bottom: 25px;">
+                <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 8px;">Paste Activation Key</label>
+                <textarea id="activation-key" placeholder="Enter your license activation key here..." rows="3" style="width: 100%; font-family: monospace; background: rgba(0, 0, 0, 0.3); color: var(--text-main); font-size: 0.85rem; border: 1px solid var(--border-color); padding: 12px; border-radius: 12px; outline: none; resize: none;"></textarea>
+            </div>
+
+            <button class="btn btn-primary btn-full" onclick="app.submitActivationKey()" style="width: 100%; padding: 14px 20px; font-size: 1rem; border-radius: 12px; font-weight: 600; cursor: pointer; transition: all 0.3s; display: inline-flex; align-items: center; justify-content: center; gap: 8px;">
+                <i class="fas fa-check-circle"></i> Activate System
+            </button>
+        </div>
+    </div>
+
     <script src="renderer.js"></script>
 </body>
 </html>
