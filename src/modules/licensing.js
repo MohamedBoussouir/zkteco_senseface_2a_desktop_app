@@ -6,7 +6,7 @@ const path = require('path');
 class LicensingManager {
     constructor(secretKey = 'HS_ZK_SECRET_KEY_2026') {
         this.secretKey = crypto.createHash('sha256').update(secretKey).digest();
-        this.iv = Buffer.alloc(16, 0); 
+        this.iv = Buffer.alloc(16, 0);
         this.licensePath = path.join(process.cwd(), 'license.dat');
         this.timeTrackPath = path.join(process.cwd(), '.sys_cache.dat');
     }
