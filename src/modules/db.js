@@ -21,6 +21,7 @@ async function initDb() {
             table.string('user_id');
             table.string('name');
             table.integer('role');
+            table.string('card_number');
             table.integer('device_id');
             table.text('fingerprints'); // JSON array
             table.unique(['user_id', 'device_id']);
@@ -31,6 +32,13 @@ async function initDb() {
         if (!hasFingers) {
             await db.schema.alterTable('users', (table) => {
                 table.text('fingerprints');
+            });
+        }
+        // Self-healing: ensure card_number column exists
+        const hasCard = await db.schema.hasColumn('users', 'card_number');
+        if (!hasCard) {
+            await db.schema.alterTable('users', (table) => {
+                table.string('card_number');
             });
         }
     }

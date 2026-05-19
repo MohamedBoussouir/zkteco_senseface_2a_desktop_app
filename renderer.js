@@ -3,6 +3,7 @@ const app = {
     currentPage: 'dashboard',
 
     async init() {
+        this.loadSavedLanguage();
         this.bindEvents();
         await this.loadDevices();
         this.showPage('dashboard');
@@ -46,12 +47,12 @@ const app = {
                 syncAllBtn.disabled = true;
                 const oldHtml = syncAllBtn.innerHTML;
                 syncAllBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Syncing...';
-                
+
                 try {
                     await this.syncAllUsers();
                     await this.syncAllBio();
                     await this.loadDashboardStats();
-                    
+
                     // Refresh current active page instantly
                     const activePage = document.querySelector('.page.active')?.id?.replace('-page', '');
                     if (activePage === 'logs') this.loadLogs();
@@ -133,13 +134,16 @@ const app = {
         if (nav) nav.classList.add('active');
 
         // Dynamic page title and subtitle updates
+        const lang = this.currentLang || 'en';
+        const trans = this.translations[lang];
+
         const pageTitles = {
-            dashboard: { title: "Dashboard", subtitle: "Welcome back, manager." },
-            users: { title: "Manage Employees", subtitle: "Create, update and enroll employee fingerprints." },
-            logs: { title: "Attendance Logs", subtitle: "View, search and sync biometric check-in history." },
-            devices: { title: "Manage Devices", subtitle: "Register and configure ZKTeco terminal hardware." },
-            reports: { title: "Late Reports", subtitle: "Analyze shift records, working hours and lateness delays." },
-            settings: { title: "Settings", subtitle: "Adjust terminal clock synchronization and system preferences." },
+            dashboard: { title: trans.dashboard, subtitle: trans.subtitle_dashboard },
+            users: { title: trans.users, subtitle: trans.subtitle_users },
+            logs: { title: trans.logs, subtitle: trans.subtitle_logs },
+            devices: { title: trans.devices, subtitle: trans.subtitle_devices },
+            reports: { title: trans.reports, subtitle: trans.subtitle_reports },
+            settings: { title: trans.settings, subtitle: trans.subtitle_settings },
             playground: { title: "Debug Center", subtitle: "Send direct command packets to device sensors." }
         };
 
@@ -204,10 +208,10 @@ const app = {
                 const info = hwRes.hwInfo;
                 document.getElementById('hw-users').innerText = info.userCounts !== undefined ? info.userCounts : '--';
                 document.getElementById('hw-user-cap').innerText = info.userCapacity || '10K';
-                
+
                 document.getElementById('hw-fingers').innerText = info.fpCounts !== undefined ? info.fpCounts : '--';
                 document.getElementById('hw-finger-cap').innerText = info.fingerprintCapacity || '10K';
-                
+
                 document.getElementById('hw-logs').innerText = info.logCounts !== undefined ? info.logCounts : '--';
                 document.getElementById('hw-log-cap').innerText = info.logCapacity || '100K';
 
@@ -225,7 +229,7 @@ const app = {
                     statusEl.innerText = 'Offline';
                 }
             }
-        } catch(e) {
+        } catch (e) {
             console.error(e);
         }
     },
@@ -233,7 +237,7 @@ const app = {
     renderChart(labels, data) {
         const ctx = document.getElementById('attendanceChart');
         if (!ctx) return;
-        
+
         if (this.attendanceChartInstance) {
             this.attendanceChartInstance.data.labels = labels;
             this.attendanceChartInstance.data.datasets[0].data = data;
@@ -278,6 +282,12 @@ const app = {
                     <td class="p-3 border-b border-slate-700 font-medium">${u.name}</td>
                     <td class="p-3 border-b border-slate-700 text-slate-400">${u.user_id}</td>
                     <td class="p-3 border-b border-slate-700">
+                        ${parseInt(u.role) === 14 
+                            ? `<span class="status-badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);"><i class="fas fa-shield-halved mr-1"></i> Admin</span>` 
+                            : `<span class="status-badge" style="background: rgba(100, 116, 139, 0.15); color: #94a3b8; border: 1px solid rgba(100, 116, 139, 0.3);"><i class="fas fa-user mr-1"></i> User</span>`
+                        }
+                    </td>
+                    <td class="p-3 border-b border-slate-700">
                         ${(() => {
                     let fpData = null;
                     try { fpData = JSON.parse(u.fingerprints || 'null'); } catch (e) { }
@@ -314,7 +324,7 @@ const app = {
                             <button class="btn btn-icon btn-blue" onclick="app.enrollFinger(${u.uid}, '${u.user_id}', ${u.device_id})" title="Enroll Finger">
                                 <i class="fas fa-fingerprint"></i>
                             </button>
-                            <button class="btn btn-icon btn-blue" onclick="app.editUser(${u.uid}, '${u.user_id}', '${u.name.replace(/'/g, "\\'")}', ${u.device_id})" title="Edit User">
+                            <button class="btn btn-icon btn-blue" onclick="app.editUser(${u.uid}, '${u.user_id}', '${u.name.replace(/'/g, "\\'")}', ${u.device_id}, '${u.card_number || ''}')" title="Edit User">
                                 <i class="fas fa-edit"></i>
                             </button>
                             <button class="btn btn-icon btn-red" onclick="app.deleteUser(${u.uid}, '${u.user_id}', ${u.device_id})" title="Delete User">
@@ -330,6 +340,8 @@ const app = {
     async saveUser() {
         const name = document.getElementById('user-name').value;
         const userId = document.getElementById('user-id').value;
+        const cardEl = document.getElementById('user-card');
+        const cardNum = cardEl ? cardEl.value : '';
         const devId = document.getElementById('user-target-device').value;
         const role = document.getElementById('user-role').value;
 
@@ -343,7 +355,8 @@ const app = {
             uid: userId,
             userId,
             name,
-            role: parseInt(role)
+            role: parseInt(role),
+            card_number: cardNum
         });
 
         if (res.success) {
@@ -355,9 +368,11 @@ const app = {
         }
     },
 
-    editUser(uid, userId, name, devId) {
+    editUser(uid, userId, name, devId, cardNum = '') {
         document.getElementById('user-name').value = name;
         document.getElementById('user-id').value = uid;
+        const cardEl = document.getElementById('user-card');
+        if (cardEl) cardEl.value = cardNum;
         document.getElementById('user-target-device').value = devId;
         document.getElementById('user-submit-btn').innerText = 'Update User';
         document.getElementById('user-cancel-btn').style.display = 'block';
@@ -370,12 +385,66 @@ const app = {
         document.getElementById('user-cancel-btn').style.display = 'none';
     },
 
+    async editCardNum(uid, userId, devId, name, role) {
+        const cardNum = prompt(`Enter RFID Card Number for ${name} (Only digits, leave blank to cancel):`);
+        if (cardNum === null) return;
+
+        const cleanCard = cardNum.trim();
+        if (!cleanCard) return;
+
+        const dev = this.devices.find(d => d.id == devId);
+        if (!dev) return;
+
+        this.showNotification('Saving RFID Card to device...', 'info');
+        const res = await window.electronAPI.invoke('update-user-card', {
+            ip: dev.ip,
+            ports: [dev.port1, dev.port2],
+            uid,
+            userId,
+            name,
+            role: parseInt(role),
+            card_number: cleanCard
+        });
+
+        if (res.success) {
+            this.showNotification('RFID Card saved successfully');
+            this.loadUsers();
+        } else {
+            this.showNotification('Error: ' + res.error, 'error');
+        }
+    },
+
+    async deleteCard(uid, userId, devId, name, role) {
+        if (!confirm(`Are you sure you want to delete the RFID card for ${name}?`)) return;
+
+        const dev = this.devices.find(d => d.id == devId);
+        if (!dev) return;
+
+        this.showNotification('Deleting RFID Card from device...', 'info');
+        const res = await window.electronAPI.invoke('update-user-card', {
+            ip: dev.ip,
+            ports: [dev.port1, dev.port2],
+            uid,
+            userId,
+            name,
+            role: parseInt(role),
+            card_number: '' // Set to empty to delete/clear card
+        });
+
+        if (res.success) {
+            this.showNotification('RFID Card deleted successfully');
+            this.loadUsers();
+        } else {
+            this.showNotification('Error: ' + res.error, 'error');
+        }
+    },
+
     async syncAllLogsOnly() {
         if (this.devices.length === 0) {
             this.showNotification('No connected devices to sync!', 'error');
             return;
         }
-        
+
         const syncLogsBtn = document.getElementById('sync-logs-only-btn');
         let oldHtml = '';
         if (syncLogsBtn) {
@@ -383,7 +452,7 @@ const app = {
             oldHtml = syncLogsBtn.innerHTML;
             syncLogsBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Syncing Logs...';
         }
-        
+
         this.showNotification('Fetching attendance logs only (Lightning Fast)...', 'info');
         let totalSynced = 0;
         try {
@@ -395,7 +464,7 @@ const app = {
             }
             this.showNotification(`Successfully synchronized ${totalSynced} attendance logs!`);
             await this.loadDashboardStats();
-            
+
             // Refresh current active page instantly
             const activePage = document.querySelector('.page.active')?.id?.replace('-page', '');
             if (activePage === 'logs') this.loadLogs();
@@ -594,7 +663,7 @@ const app = {
 
     showNotification(msg, type = 'success') {
         document.querySelectorAll('.notification-toast').forEach(t => t.remove());
-        
+
         const toast = document.createElement('div');
         toast.className = `notification-toast ${type}`;
         toast.innerHTML = `
@@ -634,13 +703,13 @@ const app = {
     async clearDeviceLogs() {
         if (!confirm('⚠️ WARNING: Are you sure you want to delete and clear ALL attendance logs inside the ZKTeco hardware device memory? This cannot be undone!')) return;
         if (!confirm('🚨 FINAL CONFIRMATION: Double check if you have synchronized all logs to your local database before clearing the hardware. Proceed?')) return;
-        
+
         const statusEl = document.getElementById('sync-time-status');
         if (statusEl) statusEl.innerHTML = 'Clearing terminal logs... ⏳';
-        
+
         this.showNotification('Cleaning device hardware memory...', 'warning');
         const res = await window.electronAPI.invoke('clear-device-logs');
-        
+
         let success = true;
         let errMsg = '';
         if (Array.isArray(res)) {
@@ -677,10 +746,10 @@ const app = {
 
         const statusEl = document.getElementById('sync-time-status');
         if (statusEl) statusEl.innerHTML = 'Setting manual time...';
-        
+
         this.showNotification('Programming custom time...', 'info');
         const res = await window.electronAPI.invoke('set-custom-time', inputVal);
-        
+
         let success = true;
         let errMsg = '';
         if (Array.isArray(res)) {
@@ -703,7 +772,7 @@ const app = {
     async loadStrategyMode() {
         const statusEl = document.getElementById('program-auto-status');
         if (statusEl) statusEl.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Loading logging strategy...';
-        
+
         try {
             const res = await window.electronAPI.invoke('get-calc-mode');
             if (res.success) {
@@ -727,7 +796,7 @@ const app = {
         const mode = selectEl.value;
         const explanationEl = document.getElementById('strategy-explanation');
         if (!explanationEl) return;
-        
+
         if (mode === 'calculated') {
             explanationEl.innerHTML = `
                 <strong>🤖 Smart Calculation Mode (Recommended):</strong><br>
@@ -758,7 +827,7 @@ const app = {
             if (res.success) {
                 this.showNotification('Attendance strategy applied successfully!');
                 if (statusEl) statusEl.innerHTML = '<span style="color: #4ade80"><i class="fas fa-check-circle mr-1"></i> Strategy applied successfully!</span>';
-                
+
                 // Refresh logs and dashboard stats instantly
                 this.loadDashboardStats();
             } else {
@@ -788,7 +857,7 @@ const app = {
         try {
             const report = await window.electronAPI.invoke('get-late-report', { date, startTime, endTime });
             this.currentReport = report || [];
-            
+
             // Clear search field and status filter on fresh generation
             const searchInput = document.getElementById('report-search-input');
             if (searchInput) searchInput.value = '';
@@ -857,6 +926,78 @@ const app = {
         });
 
         this.renderLateReportTable(filtered);
+    },
+
+    translations: {
+        en: {
+            dashboard: "Dashboard",
+            subtitle_dashboard: "Welcome back, manager.",
+            users: "Manage Employees",
+            subtitle_users: "Create, update and enroll employee fingerprints.",
+            logs: "Attendance Logs",
+            subtitle_logs: "View, search and sync biometric check-in history.",
+            devices: "Manage Devices",
+            subtitle_devices: "Register and configure ZKTeco terminal hardware.",
+            reports: "Late Reports",
+            subtitle_reports: "Analyze shift records, working hours and lateness delays.",
+            settings: "Settings",
+            subtitle_settings: "Adjust terminal clock synchronization and system preferences.",
+            sync_btn: "Sync All Devices",
+            syncing: "Syncing..."
+        },
+        fr: {
+            dashboard: "Tableau de Bord",
+            subtitle_dashboard: "Bon retour, responsable.",
+            users: "Gérer les Employés",
+            subtitle_users: "Créer, mettre à jour et enregistrer les empreintes digitales.",
+            logs: "Journaux de Présence",
+            subtitle_logs: "Consulter, rechercher et synchroniser l'historique.",
+            devices: "Gérer les Appareils",
+            subtitle_devices: "Enregistrer et configurer les terminaux ZKTeco.",
+            reports: "Rapports de Retard",
+            subtitle_reports: "Analyser les horaires, les heures de travail et les retards.",
+            settings: "Paramètres",
+            subtitle_settings: "Ajuster la synchronisation de l'horloge et les préférences.",
+            sync_btn: "Synchro tous Appareils",
+            syncing: "Synchro..."
+        }
+    },
+
+    currentLang: 'en',
+
+    changeLanguage(lang) {
+        this.currentLang = lang;
+        localStorage.setItem('hs_lang', lang);
+        
+        // 1. Update active page headers if currently rendering
+        this.showPage(this.currentPage);
+
+        // 2. Update Sync button text
+        const syncAllBtn = document.getElementById('sync-all-btn');
+        if (syncAllBtn) {
+            syncAllBtn.innerHTML = `<i class="fas fa-sync-alt"></i> ${this.translations[lang].sync_btn}`;
+        }
+
+        // 3. Update sidebar navigation text
+        const navItems = document.querySelectorAll('.nav-item');
+        navItems.forEach(item => {
+            const page = item.dataset.page;
+            if (page && this.translations[lang][page]) {
+                const icon = item.querySelector('i').outerHTML;
+                item.innerHTML = `${icon} ${this.translations[lang][page]}`;
+            }
+        });
+
+        // 4. Update dropdown status in Settings Page
+        const selector = document.getElementById('setting-app-lang');
+        if (selector) selector.value = lang;
+
+        this.showNotification(`Language changed to ${lang === 'en' ? 'English' : 'Français'}`);
+    },
+
+    loadSavedLanguage() {
+        const saved = localStorage.getItem('hs_lang') || 'en';
+        this.changeLanguage(saved);
     }
 };
 

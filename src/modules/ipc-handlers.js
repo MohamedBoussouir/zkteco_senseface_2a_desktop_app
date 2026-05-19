@@ -73,17 +73,17 @@ function setupIpcHandlers(mainWindow) {
         try {
             const usersCount = (await db('users').count('id as cnt').first()).cnt || 0;
             const logsCount = (await db('attendance').count('id as cnt').first()).cnt || 0;
-            
+
             const todayStr = new Date().toISOString().split('T')[0];
             const todayPunches = (await db('attendance').where('timestamp', 'like', `${todayStr}%`).count('id as cnt').first()).cnt || 0;
-            
+
             const usersList = await db('users').select('fingerprints');
             let fpCount = 0;
             usersList.forEach(u => {
                 try {
                     const fpData = JSON.parse(u.fingerprints);
                     if (fpData && typeof fpData.count === 'number') fpCount += fpData.count;
-                } catch(e) {}
+                } catch (e) { }
             });
 
             // Get chart data (last 7 days)
@@ -98,7 +98,7 @@ function setupIpcHandlers(mainWindow) {
             }
 
             return { success: true, stats: { usersCount, logsCount, todayPunches, fpCount, chartData } };
-        } catch(e) {
+        } catch (e) {
             return { success: false, error: e.message };
         }
     });
@@ -113,7 +113,7 @@ function setupIpcHandlers(mainWindow) {
                     hwInfo = await withLock(device.ip, [device.port1, device.port2], async (zk) => {
                         return await zk.getInfo();
                     });
-                } catch(e) {}
+                } catch (e) { }
             }
 
             // Fallback: calculate fingerprints from local SQLite if device didn't return them
@@ -124,9 +124,9 @@ function setupIpcHandlers(mainWindow) {
                     try {
                         const fpData = JSON.parse(u.fingerprints);
                         if (fpData && typeof fpData.count === 'number') localFpCount += fpData.count;
-                    } catch(e) {}
+                    } catch (e) { }
                 });
-            } catch(e) {}
+            } catch (e) { }
 
             if (hwInfo) {
                 if (hwInfo.fpCounts === undefined || hwInfo.fpCounts === null || hwInfo.fpCounts === 0) {
@@ -137,14 +137,14 @@ function setupIpcHandlers(mainWindow) {
             }
 
             return { success: true, hwInfo };
-        } catch(e) {
+        } catch (e) {
             return { success: false, error: e.message };
         }
     });
 
-    ipcMain.handle('create-user', async (event, { ip, ports, uid, userId, name, role, user }) => {
+    ipcMain.handle('create-user', async (event, { ip, ports, uid, userId, name, role, card_number, user }) => {
         // Handle both object-style and flat-style parameters
-        const userData = user || { uid, userId, name, role };
+        const userData = user || { uid, userId, name, role, card_number };
 
         const res = await createUser(ip, ports, userData);
         if (res.success) {
@@ -155,6 +155,7 @@ function setupIpcHandlers(mainWindow) {
                     user_id: (userData.userId || userData.uid).toString(),
                     name: userData.name || 'Unknown',
                     role: userData.role || 0,
+                    card_number: userData.card_number ? userData.card_number.toString() : '',
                     device_id: device.id,
                     fingerprints: '[]'
                 }).onConflict(['user_id', 'device_id']).merge();
@@ -162,6 +163,21 @@ function setupIpcHandlers(mainWindow) {
         }
         return res;
     });
+
+    ipcMain.handle('update-user-card', async (event, { ip, ports, uid, userId, name, role, card_number }) => {
+        const userData = { uid, userId, name, role, card_number };
+        const res = await createUser(ip, ports, userData);
+        if (res.success) {
+            const device = await db('devices').where('ip', ip).first();
+            if (device) {
+                await db('users').where({ user_id: userId.toString(), device_id: device.id }).update({
+                    card_number: card_number ? card_number.toString() : ''
+                });
+            }
+        }
+        return res;
+    });
+
     ipcMain.handle('delete-user', async (event, { ip, ports, uid, userId }) => deleteUser(ip, ports, uid, userId));
     ipcMain.handle('delete-user-finger', async (event, { ip, ports, uid, userId, fingerIndex }) => {
         const fIdx = parseInt(fingerIndex);
@@ -204,7 +220,7 @@ function setupIpcHandlers(mainWindow) {
 
                         let ts = log.recordTime || log.timestamp;
                         if (!ts) continue;
-                        
+
                         const isoTs = ts instanceof Date ? ts.toISOString() : new Date(ts).toISOString();
 
                         const user = await db('users').where({ user_id: rawId.toString(), device_id: device.id }).first();
@@ -216,7 +232,7 @@ function setupIpcHandlers(mainWindow) {
                             device_id: device.id
                         }).onConflict(['user_id', 'timestamp', 'device_id']).merge();
                         logsCount++;
-                    } catch (e) {}
+                    } catch (e) { }
                 }
             } catch (err) {
                 console.error(`[Sync] Failed to fetch attendance logs from ${ip}:`, err.message);
@@ -242,7 +258,7 @@ function setupIpcHandlers(mainWindow) {
 
                         let ts = log.recordTime || log.timestamp;
                         if (!ts) continue;
-                        
+
                         const isoTs = ts instanceof Date ? ts.toISOString() : new Date(ts).toISOString();
 
                         const user = await db('users').where({ user_id: rawId.toString(), device_id: device.id }).first();
@@ -254,7 +270,7 @@ function setupIpcHandlers(mainWindow) {
                             device_id: device.id
                         }).onConflict(['user_id', 'timestamp', 'device_id']).merge();
                         logsCount++;
-                    } catch (e) {}
+                    } catch (e) { }
                 }
             } catch (err) {
                 console.error(`[Sync-Logs] Failed to fetch attendance logs from ${ip}:`, err.message);
@@ -271,7 +287,7 @@ function setupIpcHandlers(mainWindow) {
             if (!device) return { success: false, error: 'Device not found' };
 
             console.log(`[Sync-Bio] Starting FAST BULK sync for ${users.length} users...`);
-            try { await zk.disableDevice(); } catch (e) {}
+            try { await zk.disableDevice(); } catch (e) { }
 
             let results = [];
             const usersMap = {};
@@ -289,11 +305,11 @@ function setupIpcHandlers(mainWindow) {
                     while (offset < data.length) {
                         const entrySize = data.readUInt16LE(offset);
                         if (entrySize === 0) break;
-                        
+
                         const userSn = data.readUInt16LE(offset + 2);
                         const fingerIndex = data.readUInt8(offset + 4); // <-- هذا هو السطر الذي نسيته سابقاً وتسبب في الخطأ
                         const flag = data.readUInt8(offset + 5);
-                        
+
                         // flag 1 = Valid, 3 = Duress
                         if ((flag === 1 || flag === 3) && usersMap[userSn]) {
                             usersMap[userSn].fpCount++;
@@ -301,7 +317,7 @@ function setupIpcHandlers(mainWindow) {
                                 usersMap[userSn].fpIndices.push(fingerIndex);
                             }
                         }
-                        
+
                         offset += entrySize;
                     }
                 }
@@ -313,15 +329,15 @@ function setupIpcHandlers(mainWindow) {
                 const finalCount = usersMap[u.uid].fpCount;
                 const indices = usersMap[u.uid].fpIndices;
                 console.log(`  -> [RESULT] User ${u.user_id}: ${finalCount} real fingerprints. Indices: ${indices.join(',')}`);
-                
+
                 await db('users')
                     .where({ user_id: u.user_id, device_id: device.id })
                     .update({ fingerprints: JSON.stringify({ count: finalCount, indices }) });
-                
+
                 results.push({ user_id: u.user_id, count: finalCount, indices });
             }
 
-            try { await zk.enableDevice(); } catch (e) {}
+            try { await zk.enableDevice(); } catch (e) { }
             return { success: true, results };
         });
     });
@@ -340,7 +356,7 @@ function setupIpcHandlers(mainWindow) {
                             fpData.count = fpData.indices.length;
                             await db('users').where('id', user.id).update({ fingerprints: JSON.stringify(fpData) });
                         }
-                    } catch(e) {}
+                    } catch (e) { }
                 }
             }
         }
@@ -387,14 +403,14 @@ function setupIpcHandlers(mainWindow) {
             const group = groups[key];
             // Sort ascending to easily find earliest and latest punches
             group.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-            
+
             // Earliest is always Check-In (0 / Arrivée)
             group[0].status = 0;
-            
+
             if (group.length > 1) {
                 // Latest is Check-Out (1 / Départ)
                 group[group.length - 1].status = 1;
-                
+
                 // Intermediate punches are marked as Break / Intermediate (2)
                 for (let i = 1; i < group.length - 1; i++) {
                     group[i].status = 2;
@@ -613,7 +629,7 @@ function setupIpcHandlers(mainWindow) {
 
     ipcMain.handle('save-calc-mode', async (event, mode) => {
         await db('settings').insert({ key: 'calc_mode', value: mode }).onConflict('key').merge();
-        
+
         const device = await db('devices').first();
         if (!device) return { success: true, msg: 'Saved locally (No device configured)' };
 
@@ -643,7 +659,7 @@ function setupIpcHandlers(mainWindow) {
 
                 // Apply changes to options memory
                 await zk.executeCmd(1014); // CMD_REFRESHOPTION
-                
+
                 await zk.enableDevice();
                 return { success: true };
             });
