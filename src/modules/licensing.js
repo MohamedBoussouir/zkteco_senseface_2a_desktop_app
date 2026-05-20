@@ -56,18 +56,18 @@ class LicensingManager {
 
     verifyLicense() {
         if (!this.checkClockFraud()) {
-            return { valid: false, message: "تلاعب في تاريخ النظام! يرجى ضبط التاريخ والوقت." };
+            return { valid: false, message: "System clock tampering detected! Please adjust date and time." };
         }
 
         if (!fs.existsSync(this.licensePath)) {
-            return { valid: false, message: "ملف الترخيص مفقود. يرجى التواصل مع المطور." };
+            return { valid: false, message: "License file missing. Please contact the developer." };
         }
 
         const encryptedLicense = fs.readFileSync(this.licensePath, 'utf8');
         const decryptedData = this.decrypt(encryptedLicense);
 
         if (!decryptedData) {
-            return { valid: false, message: "بيانات الترخيص غير صالحة." };
+            return { valid: false, message: "Invalid license data." };
         }
 
         try {
@@ -77,23 +77,23 @@ class LicensingManager {
             const expiryDate = new Date(expiry);
 
             if (mid !== currentMid) {
-                return { valid: false, message: "هذا الترخيص مخصص لجهاز آخر." };
+                return { valid: false, message: "This license is assigned to a different device." };
             }
 
             if (now > expiryDate) {
-                return { valid: false, message: `انتهت صلاحية الترخيص في ${expiryDate.toLocaleDateString()}.` };
+                return { valid: false, message: `License expired on ${expiryDate.toLocaleDateString()}.` };
             }
 
             return { valid: true, expiryDate };
         } catch (e) {
-            return { valid: false, message: "فشل في قراءة بيانات الترخيص." };
+            return { valid: false, message: "Failed to read license data." };
         }
     }
 
     saveLicenseKey(key) {
         try {
             const decrypted = this.decrypt(key.trim());
-            if (!decrypted) return { success: false, message: "مفتاح الترخيص غير صالح للتشفير المعتمد." };
+            if (!decrypted) return { success: false, message: "Invalid license key for the approved encryption." };
 
             const { mid, expiry } = JSON.parse(decrypted);
             const currentMid = this.getMachineId();
@@ -101,17 +101,17 @@ class LicensingManager {
             const expiryDate = new Date(expiry);
 
             if (mid !== currentMid) {
-                return { success: false, message: "هذا الترخيص مخصص لجهاز آخر ومختلف." };
+                return { success: false, message: "This license is assigned to a different device." };
             }
 
             if (now > expiryDate) {
-                return { success: false, message: `انتهت صلاحية هذا الترخيص في ${expiryDate.toLocaleDateString()}.` };
+                return { success: false, message: `This license expired on ${expiryDate.toLocaleDateString()}.` };
             }
 
             fs.writeFileSync(this.licensePath, key.trim(), 'utf8');
             return { success: true };
         } catch (e) {
-            return { success: false, message: "بيانات مفتاح الترخيص تالفة أو غير صالحة." };
+            return { success: false, message: "License key data is corrupted or invalid." };
         }
     }
 

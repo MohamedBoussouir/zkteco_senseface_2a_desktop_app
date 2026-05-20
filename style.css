@@ -472,3 +472,297 @@ input:focus { border-color: var(--accent-primary); background: rgba(0,0,0,0.3); 
 .space-y-2 > * + * {
     margin-top: 0.5rem;
 }
+
+/* --- Schedules & Shifts Redesigned Tabs & Layouts --- */
+.schedules-tabs {
+    display: flex;
+    gap: 5px;
+    margin-bottom: 25px;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 1px;
+}
+
+.schedule-tab-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-weight: 500;
+    padding: 12px 20px;
+    font-size: 0.95rem;
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    border-radius: 8px 8px 0 0;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    outline: none;
+}
+
+.schedule-tab-btn:hover {
+    color: var(--text-main);
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.schedule-tab-btn.active {
+    color: var(--text-main);
+    border-bottom-color: var(--accent-primary);
+    font-weight: 600;
+    background: linear-gradient(180deg, transparent 50%, rgba(99, 102, 241, 0.05) 100%);
+}
+
+.schedule-tab-btn i {
+    font-size: 1.1rem;
+    transition: transform 0.3s;
+}
+
+.schedule-tab-btn.active i {
+    transform: scale(1.1);
+}
+
+.schedule-tab-content {
+    display: none;
+    animation: fadeIn 0.4s ease;
+}
+
+.schedule-tab-content.active {
+    display: block;
+}
+
+/* Two Column Layout for Tabs */
+.schedules-two-col {
+    display: grid;
+    grid-template-columns: 1fr 1.5fr;
+    gap: 25px;
+    align-items: start;
+}
+
+@media (max-width: 1024px) {
+    .schedules-two-col {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Custom styles for checkboxes in bulk view */
+.employee-checkbox-list {
+    max-height: 220px;
+    overflow-y: auto;
+    background: rgba(0, 0, 0, 0.15);
+    border: 1px solid var(--glass-border);
+    border-radius: 12px;
+    padding: 12px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 10px;
+}
+
+.employee-checkbox-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--glass-border);
+    padding: 8px 12px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    user-select: none;
+}
+
+.employee-checkbox-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.15);
+}
+
+.employee-checkbox-item input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent-primary);
+    cursor: pointer;
+}
+
+.employee-checkbox-item.checked {
+    background: rgba(99, 102, 241, 0.08);
+    border-color: rgba(99, 102, 241, 0.3);
+}
+
+/* Info Alert Card */
+.info-alert-card {
+    background: rgba(99, 102, 241, 0.05);
+    border: 1px solid rgba(99, 102, 241, 0.15);
+    border-radius: 16px;
+    padding: 15px 20px;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    margin-bottom: 20px;
+}
+
+.info-alert-card i {
+    font-size: 1.2rem;
+    color: var(--accent-primary);
+    margin-top: 2px;
+}
+
+.info-alert-card p {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+/* Quick search bar for daily scheduler */
+.search-filter-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    flex-wrap: wrap;
+    gap: 15px;
+}
+
+/* Dynamic active state animations */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Reports Dashboard KPI Cards */
+.kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 20px;
+    margin-bottom: 25px;
+}
+
+.kpi-card {
+    background: var(--bg-card);
+    border: 1px solid var(--glass-border);
+    border-radius: 20px;
+    padding: 20px;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    backdrop-filter: blur(10px);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.kpi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+}
+
+.kpi-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.3rem;
+}
+
+.kpi-info {
+    display: flex;
+    flex-direction: column;
+}
+
+.kpi-title {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-weight: 500;
+    margin-bottom: 4px;
+}
+
+.kpi-value {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--text-main);
+    line-height: 1.2;
+}
+
+.kpi-sub {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 3px;
+}
+
+/* Expandable Drawer Row Styling */
+.clickable-row {
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.clickable-row:hover {
+    background: rgba(255, 255, 255, 0.02) !important;
+}
+
+.detail-drawer-row {
+    background: rgba(10, 11, 20, 0.5) !important;
+    display: none; 
+}
+
+.detail-drawer-row.active {
+    display: table-row;
+    animation: fadeIn 0.3s ease-out;
+}
+
+.detail-drawer-container {
+    padding: 15px 25px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.drawer-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 12px;
+    color: var(--accent-secondary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.drawer-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+}
+
+.drawer-table th {
+    background: rgba(255, 255, 255, 0.02);
+    color: var(--text-muted);
+    text-align: left;
+    padding: 8px 12px;
+    font-weight: 600;
+    font-size: 0.75rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.drawer-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.drawer-table tr:last-child td {
+    border-bottom: none;
+}
+
+.chevron-icon {
+    transition: transform 0.2s ease;
+}
+
+.chevron-rotated {
+    transform: rotate(180deg);
+}
+
+/* Fix native calendar and time picker icons for dark mode globally */
+input::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+    cursor: pointer;
+}
+
+/* Fix select option dropdown visibility globally */
+select option {
+    background-color: #101223 !important;
+    color: var(--text-main) !important;
+}
+

@@ -48,8 +48,12 @@ function setupIpcHandlers(mainWindow) {
     });
 
     // Users
-    ipcMain.handle('get-local-users', async () => db('users').select('*'));
-    ipcMain.handle('get-users', async () => db('users').select('*')); // Support both names
+    const getUsersQuery = () => db('users')
+        .leftJoin('work_patterns', 'users.work_pattern_id', 'work_patterns.id')
+        .select('users.*', 'work_patterns.name as pattern_name');
+
+    ipcMain.handle('get-local-users', async () => getUsersQuery());
+    ipcMain.handle('get-users', async () => getUsersQuery()); // Support both names
     ipcMain.handle('fetch-device-users', async (event, { ip, ports }) => {
         try {
             const device = await db('devices').where('ip', ip).first();
@@ -143,9 +147,9 @@ function setupIpcHandlers(mainWindow) {
         }
     });
 
-    ipcMain.handle('create-user', async (event, { ip, ports, uid, userId, name, role, card_number, user }) => {
+    ipcMain.handle('create-user', async (event, { ip, ports, uid, userId, name, role, work_pattern_id, user }) => {
         // Handle both object-style and flat-style parameters
-        const userData = user || { uid, userId, name, role, card_number };
+        const userData = user || { uid, userId, name, role, work_pattern_id };
 
         const res = await createUser(ip, ports, userData);
         if (res.success) {
@@ -156,23 +160,24 @@ function setupIpcHandlers(mainWindow) {
                     user_id: (userData.userId || userData.uid).toString(),
                     name: userData.name || 'Unknown',
                     role: userData.role || 0,
-                    card_number: userData.card_number ? userData.card_number.toString() : '',
                     device_id: device.id,
-                    fingerprints: '[]'
+                    fingerprints: '[]',
+                    work_pattern_id: userData.work_pattern_id || null
                 }).onConflict(['user_id', 'device_id']).merge();
             }
         }
         return res;
     });
 
-    ipcMain.handle('update-user-card', async (event, { ip, ports, uid, userId, name, role, card_number }) => {
-        const userData = { uid, userId, name, role, card_number };
+    ipcMain.handle('update-user', async (event, { ip, ports, uid, userId, name, role, work_pattern_id }) => {
+        const userData = { uid, userId, name, role };
         const res = await createUser(ip, ports, userData);
         if (res.success) {
             const device = await db('devices').where('ip', ip).first();
             if (device) {
                 await db('users').where({ user_id: userId.toString(), device_id: device.id }).update({
-                    card_number: card_number ? card_number.toString() : ''
+                    name: name,
+                    work_pattern_id: work_pattern_id || null
                 });
             }
         }
@@ -576,11 +581,36 @@ function setupIpcHandlers(mainWindow) {
         return results;
     });
 
-    ipcMain.handle('get-late-report', async (event, { date, startTime, endTime }) => {
-        const users = await db('users').select('user_id', 'name');
-        const logs = await db('attendance').where('timestamp', 'like', `${date}%`).select('*');
-        const schedules = await db('schedules').where('date', date).select('*');
+    ipcMain.handle('get-late-report', async (event, { date, startTime, endTime, mode, month, year, startDateParam, endDateParam }) => {
+        let startDate = date;
+        let endDate = date;
+        let reportMode = mode || 'day';
+
+        if (reportMode === 'month') {
+            const [yearPart, monthPart] = month.split('-').map(Number);
+            const lastDay = new Date(yearPart, monthPart, 0).getDate();
+            const lastDayStr = String(lastDay).padStart(2, '0');
+            startDate = `${month}-01`;
+            endDate = `${month}-${lastDayStr}`;
+        } else if (reportMode === 'year') {
+            startDate = `${year}-01-01`;
+            endDate = `${year}-12-31`;
+        } else if (reportMode === 'range') {
+            startDate = startDateParam;
+            endDate = endDateParam;
+        }
+
+        const users = await db('users').select('user_id', 'name', 'work_pattern_id');
+        const logs = await db('attendance')
+            .where('timestamp', '>=', startDate)
+            .andWhere('timestamp', '<=', `${endDate}T23:59:59.999Z`)
+            .select('*');
+        const schedules = await db('schedules')
+            .where('date', '>=', startDate)
+            .andWhere('date', '<=', endDate)
+            .select('*');
         const shifts = await db('shifts').select('*');
+        const workPatternDays = await db('work_pattern_days').select('*');
 
         const getMinutes = (ts) => {
             const d = new Date(ts);
@@ -591,101 +621,193 @@ function setupIpcHandlers(mainWindow) {
             return h * 60 + m;
         };
 
+        const getDatesInRange = (startStr, endStr) => {
+            const dates = [];
+            const start = new Date(startStr + 'T00:00:00');
+            const end = new Date(endStr + 'T00:00:00');
+            let current = new Date(start);
+            while (current <= end) {
+                const y = current.getFullYear();
+                const m = String(current.getMonth() + 1).padStart(2, '0');
+                const d = String(current.getDate()).padStart(2, '0');
+                dates.push(`${y}-${m}-${d}`);
+                current.setDate(current.getDate() + 1);
+            }
+            return dates;
+        };
+
         const results = [];
+        const dateList = getDatesInRange(startDate, endDate);
+
         for (const user of users) {
             const userLogs = logs.filter(l => l.user_id === user.user_id);
-            const userSchedule = schedules.find(s => s.user_id === user.user_id);
+            const userSchedules = schedules.filter(s => s.user_id === user.user_id);
 
-            let expectedStart = startTime;
-            let expectedEnd = endTime;
-            let isOffDay = false;
-            let shiftName = '';
+            const dailyRecords = [];
+            let totalDays = 0; 
+            let presentDays = 0; 
+            let absentDays = 0; 
+            let lateDays = 0; 
+            let offDaysCount = 0; 
+            let workedOffDays = 0; 
+            let totalDelayMins = 0;
+            let totalWorkedHrs = 0;
 
-            if (userSchedule) {
-                if (userSchedule.is_off_day) {
-                    isOffDay = true;
-                } else if (userSchedule.shift_id) {
-                    const shift = shifts.find(s => s.id === userSchedule.shift_id);
-                    if (shift) {
-                        expectedStart = shift.start_time;
-                        expectedEnd = shift.end_time;
-                        shiftName = shift.name;
+            for (const currentDate of dateList) {
+                const userSchedule = userSchedules.find(s => s.date === currentDate);
+                
+                let expectedStart = startTime;
+                let expectedEnd = endTime;
+                let isOffDay = false;
+                let shiftName = '';
+
+                if (userSchedule) {
+                    if (userSchedule.is_off_day) {
+                        isOffDay = true;
+                    } else if (userSchedule.shift_id) {
+                        const shift = shifts.find(s => s.id === userSchedule.shift_id);
+                        if (shift) {
+                            expectedStart = shift.start_time;
+                            expectedEnd = shift.end_time;
+                            shiftName = shift.name;
+                        }
+                    }
+                } else if (user.work_pattern_id) {
+                    const dOfWeek = new Date(currentDate).getDay();
+                    const patternDay = workPatternDays.find(p => p.pattern_id === user.work_pattern_id && p.day_of_week === dOfWeek);
+                    if (patternDay) {
+                        if (patternDay.shift_id) {
+                            const shift = shifts.find(s => s.id === patternDay.shift_id);
+                            if (shift) {
+                                expectedStart = shift.start_time;
+                                expectedEnd = shift.end_time;
+                                shiftName = shift.name;
+                            }
+                        } else {
+                            isOffDay = true;
+                        }
+                    }
+                }
+
+                const dayLogs = userLogs.filter(l => l.timestamp.startsWith(currentDate));
+
+                if (isOffDay) {
+                    offDaysCount++;
+                    if (dayLogs.length === 0) {
+                        dailyRecords.push({
+                            date: currentDate,
+                            first: '--',
+                            last: '--',
+                            worked: '--',
+                            delay: '--',
+                            expected: 'Off Day',
+                            status: 'Off Day'
+                        });
+                    } else {
+                        workedOffDays++;
+                        dayLogs.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                        const first = dayLogs[0].timestamp;
+                        const last = dayLogs[dayLogs.length - 1].timestamp;
+                        const diffMs = new Date(last) - new Date(first);
+                        const hoursWorked = (diffMs / (1000 * 60 * 60)).toFixed(2);
+                        const hoursWorkedNum = parseFloat(hoursWorked) || 0;
+                        totalWorkedHrs += hoursWorkedNum;
+
+                        dailyRecords.push({
+                            date: currentDate,
+                            first: new Date(first).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                            last: new Date(last).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                            worked: `${hoursWorked} hrs`,
+                            delay: '--',
+                            expected: 'Off Day (Worked)',
+                            status: 'On Time'
+                        });
+                    }
+                } else {
+                    totalDays++; 
+                    if (dayLogs.length === 0) {
+                        absentDays++;
+                        dailyRecords.push({
+                            date: currentDate,
+                            first: '--',
+                            last: '--',
+                            worked: '--',
+                            delay: '--',
+                            expected: `${expectedStart} - ${expectedEnd}`,
+                            status: 'Absent'
+                        });
+                    } else {
+                        presentDays++;
+                        dayLogs.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                        const first = dayLogs[0].timestamp;
+                        const last = dayLogs[dayLogs.length - 1].timestamp;
+
+                        const firstMin = getMinutes(first);
+                        const startMin = parseTimeStr(expectedStart);
+                        const diffMs = new Date(last) - new Date(first);
+                        const hoursWorked = (diffMs / (1000 * 60 * 60)).toFixed(2);
+                        const hoursWorkedNum = parseFloat(hoursWorked) || 0;
+                        totalWorkedHrs += hoursWorkedNum;
+
+                        let delayVal = 0;
+                        let delayStr = '--';
+                        let status = 'On Time';
+                        if (firstMin > startMin) {
+                            delayVal = firstMin - startMin;
+                            delayStr = `+${delayVal} mins`;
+                            status = 'Late';
+                            lateDays++;
+                            totalDelayMins += delayVal;
+                        }
+
+                        dailyRecords.push({
+                            date: currentDate,
+                            first: new Date(first).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                            last: new Date(last).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                            worked: `${hoursWorked} hrs`,
+                            delay: delayStr,
+                            expected: `${expectedStart} - ${expectedEnd}${shiftName ? ` (${shiftName})` : ''}`,
+                            status
+                        });
                     }
                 }
             }
 
-            if (isOffDay) {
-                if (userLogs.length === 0) {
-                    results.push({
-                        name: user.name,
-                        user_id: user.user_id,
-                        first: '--',
-                        last: '--',
-                        worked: '--',
-                        delay: '--',
-                        expected: 'Off Day (إجازة)',
-                        status: 'Off Day'
-                    });
-                } else {
-                    userLogs.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-                    const first = userLogs[0].timestamp;
-                    const last = userLogs[userLogs.length - 1].timestamp;
-                    const diffMs = new Date(last) - new Date(first);
-                    const hoursWorked = (diffMs / (1000 * 60 * 60)).toFixed(2);
-                    results.push({
-                        name: user.name,
-                        user_id: user.user_id,
-                        first: new Date(first).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                        last: new Date(last).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                        worked: `${hoursWorked} hrs`,
-                        delay: '--',
-                        expected: 'Off Day (عمل في الإجازة)',
-                        status: 'On Time'
-                    });
-                }
-                continue;
-            }
-
-            if (userLogs.length === 0) {
-                results.push({
-                    name: user.name,
-                    user_id: user.user_id,
+            if (reportMode === 'day') {
+                const record = dailyRecords[0] || {
+                    date: date,
                     first: '--',
                     last: '--',
                     worked: '--',
                     delay: '--',
-                    expected: `${expectedStart} - ${expectedEnd}`,
+                    expected: `${startTime} - ${endTime}`,
                     status: 'Absent'
+                };
+                results.push({
+                    name: user.name,
+                    user_id: user.user_id,
+                    first: record.first,
+                    last: record.last,
+                    worked: record.worked,
+                    delay: record.delay,
+                    expected: record.expected,
+                    status: record.status
                 });
-                continue;
+            } else {
+                results.push({
+                    name: user.name,
+                    user_id: user.user_id,
+                    totalDays,
+                    presentDays,
+                    absentDays,
+                    lateDays,
+                    offDays: offDaysCount,
+                    workedOffDays,
+                    totalDelayMins,
+                    totalWorkedHrs: totalWorkedHrs.toFixed(2),
+                    dailyDetails: dailyRecords
+                });
             }
-
-            userLogs.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-            const first = userLogs[0].timestamp;
-            const last = userLogs[userLogs.length - 1].timestamp;
-
-            const firstMin = getMinutes(first);
-            const startMin = parseTimeStr(expectedStart);
-            const diffMs = new Date(last) - new Date(first);
-            const hoursWorked = (diffMs / (1000 * 60 * 60)).toFixed(2);
-
-            let delay = '--';
-            let status = 'On Time';
-            if (firstMin > startMin) {
-                delay = `+${firstMin - startMin} mins`;
-                status = 'Late';
-            }
-
-            results.push({
-                name: user.name,
-                user_id: user.user_id,
-                first: new Date(first).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                last: new Date(last).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                worked: `${hoursWorked} hrs`,
-                delay,
-                expected: `${expectedStart} - ${expectedEnd}${shiftName ? ` (${shiftName})` : ''}`,
-                status
-            });
         }
         return results;
     });
@@ -702,6 +824,44 @@ function setupIpcHandlers(mainWindow) {
 
     ipcMain.handle('delete-shift', async (event, id) => {
         await db('shifts').where('id', id).delete();
+        return { success: true };
+    });
+
+    // Work Patterns IPC Handlers
+    ipcMain.handle('get-work-patterns', async () => {
+        const patterns = await db('work_patterns').select('*');
+        const days = await db('work_pattern_days').select('*');
+        return patterns.map(p => ({
+            ...p,
+            days: days.filter(d => d.pattern_id === p.id)
+        }));
+    });
+
+    ipcMain.handle('save-work-pattern', async (event, { id, name, days }) => {
+        let patternId = id;
+        if (!patternId) {
+            const [newId] = await db('work_patterns').insert({ name });
+            patternId = newId;
+        } else {
+            await db('work_patterns').where('id', patternId).update({ name });
+        }
+
+        await db('work_pattern_days').where('pattern_id', patternId).delete();
+
+        if (days && days.length > 0) {
+            const daysData = days.map(d => ({
+                pattern_id: patternId,
+                day_of_week: d.day_of_week,
+                shift_id: d.shift_id
+            }));
+            await db('work_pattern_days').insert(daysData);
+        }
+
+        return { success: true, id: patternId };
+    });
+
+    ipcMain.handle('delete-work-pattern', async (event, id) => {
+        await db('work_patterns').where('id', id).delete();
         return { success: true };
     });
 
@@ -731,6 +891,22 @@ function setupIpcHandlers(mainWindow) {
     ipcMain.handle('get-calc-mode', async () => {
         const row = await db('settings').where('key', 'calc_mode').first();
         return { success: true, mode: row ? row.value : 'calculated' };
+    });
+
+    ipcMain.handle('get-default-shift', async () => {
+        const startRow = await db('settings').where('key', 'default_start_time').first();
+        const endRow = await db('settings').where('key', 'default_end_time').first();
+        return { 
+            success: true, 
+            start_time: startRow ? startRow.value : '08:00',
+            end_time: endRow ? endRow.value : '17:00'
+        };
+    });
+
+    ipcMain.handle('save-default-shift', async (event, { start_time, end_time }) => {
+        await db('settings').insert({ key: 'default_start_time', value: start_time }).onConflict('key').merge();
+        await db('settings').insert({ key: 'default_end_time', value: end_time }).onConflict('key').merge();
+        return { success: true };
     });
 
     ipcMain.handle('save-calc-mode', async (event, mode) => {

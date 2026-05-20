@@ -21,7 +21,6 @@ async function initDb() {
             table.string('user_id');
             table.string('name');
             table.integer('role');
-            table.string('card_number');
             table.integer('device_id');
             table.text('fingerprints'); // JSON array
             table.unique(['user_id', 'device_id']);
@@ -34,11 +33,11 @@ async function initDb() {
                 table.text('fingerprints');
             });
         }
-        // Self-healing: ensure card_number column exists
-        const hasCard = await db.schema.hasColumn('users', 'card_number');
-        if (!hasCard) {
+        // Self-healing: ensure work_pattern_id column exists
+        const hasWorkPatternId = await db.schema.hasColumn('users', 'work_pattern_id');
+        if (!hasWorkPatternId) {
             await db.schema.alterTable('users', (table) => {
-                table.string('card_number');
+                table.integer('work_pattern_id').unsigned().references('id').inTable('work_patterns').onDelete('SET NULL');
             });
         }
     }
@@ -78,6 +77,9 @@ async function initDb() {
         });
         await db('settings').insert({ key: 'calc_mode', value: 'calculated' });
     }
+    await db('settings').insert({ key: 'default_start_time', value: '08:00' }).onConflict('key').ignore();
+    await db('settings').insert({ key: 'default_end_time', value: '17:00' }).onConflict('key').ignore();
+
 
     // Shifts Table
     const hasShifts = await db.schema.hasTable('shifts');
@@ -105,6 +107,25 @@ async function initDb() {
             table.integer('shift_id').unsigned().references('id').inTable('shifts').onDelete('CASCADE');
             table.integer('is_off_day').defaultTo(0);
             table.unique(['user_id', 'date']);
+        });
+    }
+    // Work Patterns Table
+    const hasWorkPatterns = await db.schema.hasTable('work_patterns');
+    if (!hasWorkPatterns) {
+        await db.schema.createTable('work_patterns', (table) => {
+            table.increments('id');
+            table.string('name');
+        });
+    }
+
+    // Work Pattern Days Table
+    const hasWorkPatternDays = await db.schema.hasTable('work_pattern_days');
+    if (!hasWorkPatternDays) {
+        await db.schema.createTable('work_pattern_days', (table) => {
+            table.integer('pattern_id').unsigned().references('id').inTable('work_patterns').onDelete('CASCADE');
+            table.integer('day_of_week'); // 0 (Sunday) to 6 (Saturday)
+            table.integer('shift_id').unsigned().references('id').inTable('shifts').onDelete('SET NULL');
+            table.unique(['pattern_id', 'day_of_week']);
         });
     }
 }
