@@ -460,6 +460,19 @@
                         </button>
                     </div>
                 </div>
+                <div class="search-filter-bar" style="margin-bottom: 15px; display: flex; gap: 15px; align-items: center; background: rgba(0, 0, 0, 0.15); padding: 15px; border-radius: 12px; border: 1px solid var(--glass-border); flex-wrap: wrap;">
+                    <div class="search-box" style="position: relative; flex: 1; min-width: 250px;">
+                        <i class="fas fa-search" style="position: absolute; left: 15px; top: 50%; transform: translateY(-50%); color: var(--text-muted); font-size: 0.9rem;"></i>
+                        <input type="text" id="logs-search-input" placeholder="Search by name or ID..." style="background: rgba(0,0,0,0.2); color: var(--text-main); border: 1px solid var(--glass-border); padding: 10px 15px 10px 40px; border-radius: 10px; font-size: 0.9rem; width: 100%; outline: none; transition: border-color 0.3s;" onfocus="this.style.borderColor='var(--accent-primary)'" onblur="this.style.borderColor='var(--glass-border)'">
+                    </div>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <span style="font-size: 0.85rem; color: var(--text-muted); font-weight: 500;">Date:</span>
+                        <input type="date" id="logs-date-filter" style="background: rgba(0,0,0,0.2); color: var(--text-main); border: 1px solid var(--glass-border); padding: 8px 12px; border-radius: 10px; font-size: 0.9rem; outline: none; cursor: pointer;">
+                        <button class="btn btn-secondary" id="clear-logs-filter-btn" style="padding: 8px 15px; border-radius: 10px; margin: 0;">
+                            <i class="fas fa-times-circle"></i> Clear Filters
+                        </button>
+                    </div>
+                </div>
                 <div class="table-container">
                     <table id="logs-table">
                         <thead>
@@ -475,6 +488,17 @@
                             <!-- Data injection -->
                         </tbody>
                     </table>
+                </div>
+                <!-- Pagination Controls -->
+                <div id="pagination-controls" style="display: flex; justify-content: space-between; align-items: center; margin-top: 15px; padding: 10px; background: rgba(0, 0, 0, 0.15); border-radius: 8px; border: 1px solid var(--glass-border);">
+                    <div id="pagination-info" style="font-size: 0.85rem; color: var(--text-muted);">
+                        Showing 0 to 0 of 0 entries
+                    </div>
+                    <div style="display: flex; gap: 5px; align-items: center;" id="pagination-buttons">
+                        <button class="btn btn-secondary btn-sm" id="prev-page-btn" disabled>Previous</button>
+                        <div id="page-numbers" style="display: flex; gap: 5px; align-items: center;"></div>
+                        <button class="btn btn-secondary btn-sm" id="next-page-btn" disabled>Next</button>
+                    </div>
                 </div>
             </div>
         </div>

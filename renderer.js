@@ -5,6 +5,11 @@ const app = {
     currentPage: 'dashboard',
     defaultStartTime: '08:00',
     defaultEndTime: '17:00',
+    currentLogPage: 1,
+    logsPerPage: 15,
+    logsSearchQuery: '',
+    logsFilterDate: '',
+    logsSearchTimeout: null,
 
     async init() {
         this.loadSavedLanguage();
@@ -150,6 +155,41 @@ const app = {
                 await this.clearAllLogs();
             };
         }
+
+        // Attendance Logs Filters
+        const searchInput = document.getElementById('logs-search-input');
+        if (searchInput) {
+            searchInput.oninput = (e) => {
+                clearTimeout(this.logsSearchTimeout);
+                this.logsSearchTimeout = setTimeout(() => {
+                    this.logsSearchQuery = e.target.value.trim();
+                    this.currentLogPage = 1;
+                    this.loadLogs();
+                }, 300);
+            };
+        }
+
+        const dateFilter = document.getElementById('logs-date-filter');
+        if (dateFilter) {
+            dateFilter.onchange = (e) => {
+                this.logsFilterDate = e.target.value;
+                this.currentLogPage = 1;
+                this.loadLogs();
+            };
+        }
+
+        const clearFiltersBtn = document.getElementById('clear-logs-filter-btn');
+        if (clearFiltersBtn) {
+            clearFiltersBtn.onclick = (e) => {
+                e.preventDefault();
+                this.logsSearchQuery = '';
+                this.logsFilterDate = '';
+                if (searchInput) searchInput.value = '';
+                if (dateFilter) dateFilter.value = '';
+                this.currentLogPage = 1;
+                this.loadLogs();
+            };
+        }
     },
 
     async loadDevices() {
@@ -253,7 +293,8 @@ const app = {
                 }
 
                 // Render Dashboard Recent Activity
-                const logs = await window.electronAPI.invoke('get-logs');
+                const res = await window.electronAPI.invoke('get-logs', { page: 1, limit: 5 });
+                const logs = Array.isArray(res) ? res : (res.logs || []);
                 const recentTbody = document.querySelector('#recent-table tbody');
                 if (recentTbody && Array.isArray(logs)) {
                     recentTbody.innerHTML = logs.slice(0, 5).map(l => `
@@ -628,7 +669,24 @@ const app = {
     },
 
     async loadLogs() {
-        const logs = await window.electronAPI.invoke('get-logs');
+        const res = await window.electronAPI.invoke('get-logs', { 
+            page: this.currentLogPage, 
+            limit: this.logsPerPage,
+            searchQuery: this.logsSearchQuery,
+            filterDate: this.logsFilterDate
+        });
+        let logs = [];
+        let totalCount = 0;
+        
+        if (Array.isArray(res)) {
+            logs = res;
+            totalCount = logs.length;
+        } else if (res && res.logs) {
+            logs = res.logs;
+            totalCount = res.totalCount;
+            this.currentLogPage = res.currentPage;
+        }
+
         const tbody = document.querySelector('#logs-table tbody');
         if (!tbody) return;
 
@@ -667,6 +725,55 @@ const app = {
                 </td>
             </tr>
         `).join('');
+
+        this.renderLogPagination(totalCount);
+    },
+
+    renderLogPagination(total) {
+        const info = document.getElementById('pagination-info');
+        const prev = document.getElementById('prev-page-btn');
+        const next = document.getElementById('next-page-btn');
+        const numbersContainer = document.getElementById('page-numbers');
+
+        if (!info || !prev || !next || !numbersContainer) return;
+
+        const totalPages = Math.ceil(total / this.logsPerPage) || 1;
+        const start = total === 0 ? 0 : (this.currentLogPage - 1) * this.logsPerPage + 1;
+        const end = Math.min(this.currentLogPage * this.logsPerPage, total);
+
+        info.innerText = `Showing ${start} to ${end} of ${total} entries`;
+
+        prev.disabled = this.currentLogPage <= 1;
+        next.disabled = this.currentLogPage >= totalPages;
+
+        prev.onclick = () => {
+            if (this.currentLogPage > 1) {
+                this.currentLogPage--;
+                this.loadLogs();
+            }
+        };
+
+        next.onclick = () => {
+            if (this.currentLogPage < totalPages) {
+                this.currentLogPage++;
+                this.loadLogs();
+            }
+        };
+
+        let html = '';
+        const maxPagesToShow = 5;
+        let startPage = Math.max(1, this.currentLogPage - 2);
+        let endPage = Math.min(totalPages, startPage + maxPagesToShow - 1);
+        
+        if (endPage - startPage < maxPagesToShow - 1) {
+            startPage = Math.max(1, endPage - maxPagesToShow + 1);
+        }
+
+        for (let i = startPage; i <= endPage; i++) {
+            const active = i === this.currentLogPage ? 'btn-primary' : 'btn-secondary';
+            html += `<button class="btn ${active} btn-sm" style="padding: 4px 10px; font-size: 0.85rem;" onclick="app.currentLogPage = ${i}; app.loadLogs()">${i}</button>`;
+        }
+        numbersContainer.innerHTML = html;
     },
 
     async deleteLog(id) {

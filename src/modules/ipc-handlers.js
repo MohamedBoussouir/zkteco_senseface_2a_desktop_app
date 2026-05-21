@@ -384,14 +384,33 @@ function setupIpcHandlers(mainWindow) {
 
     // Logs
     // Logs
-    ipcMain.handle('get-logs', async () => {
-        const rawLogs = await db('attendance').select('*').orderBy('timestamp', 'desc').limit(1000);
+    ipcMain.handle('get-logs', async (event, { page = 1, limit = 15, searchQuery = '', filterDate = '' } = {}) => {
+        const offset = (page - 1) * limit;
+        
+        let query = db('attendance');
+        
+        if (searchQuery) {
+            query = query.where(function() {
+                this.where('user_name', 'like', `%${searchQuery}%`)
+                    .orWhere('user_id', searchQuery);
+            });
+        }
+        
+        if (filterDate) {
+            query = query.where('timestamp', 'like', `${filterDate}%`);
+        }
+        
+        const countRes = await query.clone().count('id as cnt').first();
+        const totalCount = countRes ? countRes.cnt : 0;
+        
+        const rawLogs = await query.clone().select('*').orderBy('timestamp', 'desc').limit(limit).offset(offset);
         const calcSetting = await db('settings').where('key', 'calc_mode').first();
         const mode = calcSetting ? calcSetting.value : 'calculated';
 
         if (mode !== 'calculated') {
-            return rawLogs;
+            return { logs: rawLogs, totalCount, currentPage: page };
         }
+
 
         // Group logs by user_id and date part of the timestamp (YYYY-MM-DD)
         const groups = {};
@@ -426,7 +445,7 @@ function setupIpcHandlers(mainWindow) {
 
         // Sort back descending by timestamp to keep chronological grid view consistent
         rawLogs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-        return rawLogs;
+        return { logs: rawLogs, totalCount, currentPage: page };
     });
     ipcMain.handle('delete-log', async (event, id) => {
         await db('attendance').where('id', id).delete();
