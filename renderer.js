@@ -2,6 +2,10 @@ const app = {
     devices: [],
     workPatterns: [],
     shifts: [],
+    usersData: [],
+    usersPage: 1,
+    usersPerPage: 10,
+    usersSearchQuery: '',
     currentPage: 'dashboard',
     defaultStartTime: '08:00',
     defaultEndTime: '17:00',
@@ -393,13 +397,75 @@ const app = {
 
     async loadUsers() {
         const users = await window.electronAPI.invoke('get-local-users');
+        this.usersData = users || [];
+        this.renderUsersTable();
+    },
+
+    handleUsersSearch(val) {
+        this.usersSearchQuery = (val || '').trim().toLowerCase();
+        this.usersPage = 1;
+        this.renderUsersTable();
+    },
+
+    prevUsersPage() {
+        if (this.usersPage > 1) {
+            this.usersPage--;
+            this.renderUsersTable();
+        }
+    },
+
+    nextUsersPage() {
+        const filtered = this.getFilteredUsers();
+        const totalPages = Math.ceil(filtered.length / this.usersPerPage) || 1;
+        if (this.usersPage < totalPages) {
+            this.usersPage++;
+            this.renderUsersTable();
+        }
+    },
+
+    getFilteredUsers() {
+        if (!this.usersSearchQuery) return this.usersData;
+        return this.usersData.filter(u => 
+            (u.name || '').toLowerCase().includes(this.usersSearchQuery) || 
+            (u.user_id || '').toString().toLowerCase().includes(this.usersSearchQuery)
+        );
+    },
+
+    renderUsersTable() {
         const tbody = document.querySelector('#users-table tbody');
         if (!tbody) return;
-        tbody.innerHTML = users.map(u => {
+        
+        const filtered = this.getFilteredUsers();
+        const totalItems = filtered.length;
+        const totalPages = Math.ceil(totalItems / this.usersPerPage) || 1;
+        
+        if (this.usersPage > totalPages) this.usersPage = totalPages;
+        if (this.usersPage < 1) this.usersPage = 1;
+
+        const startIndex = (this.usersPage - 1) * this.usersPerPage;
+        const endIndex = Math.min(startIndex + this.usersPerPage, totalItems);
+        
+        const currentData = filtered.slice(startIndex, endIndex);
+
+        const infoEl = document.getElementById('users-page-info');
+        if (infoEl) {
+            if (totalItems === 0) {
+                infoEl.innerText = 'Showing 0 to 0 of 0 entries';
+            } else {
+                infoEl.innerText = `Showing ${startIndex + 1} to ${endIndex} of ${totalItems} entries`;
+            }
+        }
+
+        tbody.innerHTML = currentData.map(u => {
             return `
                 <tr class="hover:bg-slate-800/50">
                     <td class="p-3 border-b border-slate-700 font-medium">${u.name}</td>
                     <td class="p-3 border-b border-slate-700 text-slate-400">${u.user_id}</td>
+                    <td class="p-3 border-b border-slate-700 text-slate-300 text-sm">
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                            ${u.assigned_devices ? u.assigned_devices.map(d => `<div class="badge badge-info" style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 6px; background: rgba(56, 189, 248, 0.1); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.2); font-size: 0.75rem;"><i class="fas fa-desktop"></i> <span>${d.name}</span> <span style="opacity: 0.6; font-family: monospace;">${d.ip}</span></div>`).join('') : ''}
+                        </div>
+                    </td>
                     <td class="p-3 border-b border-slate-700">
                         ${parseInt(u.role) === 14 
                             ? `<span class="status-badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);"><i class="fas fa-shield-halved mr-1"></i> Admin</span>` 
@@ -423,14 +489,14 @@ const app = {
                                 <div class="inline-flex items-center bg-slate-800/40 rounded-xl p-1 border border-slate-700/50 shadow-inner whitespace-nowrap gap-1">
                                     ${(fpData && Array.isArray(fpData.indices) ? fpData.indices : []).map(f => `
                                         <button class="finger-count-badge cursor-pointer hover:scale-110 transition-transform bg-transparent border-none p-0 flex items-center outline-none" 
-                                            onclick="app.deleteFingerDirect(${u.uid}, '${u.user_id}', ${u.device_id}, ${f})" 
+                                            onclick="app.deleteFingerDirectFlow(${u.uid}, '${u.user_id}', ${f}, '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices)))}')" 
                                             title="Delete Finger ${f}">
                                             <i class="fas fa-fingerprint"></i> <span class="ml-1">${f}</span>
                                         </button>
                                     `).join('')}
                                     
                                     <div class="border-l border-slate-700/50 pl-1 ml-1 flex items-center">
-                                        <button class="btn btn-xs btn-red" onclick="app.deleteAllFingers(${u.uid}, '${u.user_id}', ${u.device_id})" title="Clear All Data">
+                                        <button class="btn btn-xs btn-red" onclick="app.deleteAllFingersFlow(${u.uid}, '${u.user_id}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices)))}')" title="Clear All Data">
                                             <i class="fas fa-eraser"></i>
                                         </button>
                                     </div>
@@ -441,13 +507,13 @@ const app = {
 
                     <td class="p-3 border-b border-slate-700">
                         <div class="actions-cell">
-                            <button class="btn btn-icon btn-blue" onclick="app.enrollFinger(${u.uid}, '${u.user_id}', ${u.device_id})" title="Enroll Finger">
+                            <button class="btn btn-icon btn-blue" onclick="app.enrollFingerFlow(${u.uid}, '${u.user_id}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices)))}')" title="Enroll Finger">
                                 <i class="fas fa-fingerprint"></i>
                             </button>
-                            <button class="btn btn-icon btn-blue" onclick="app.editUser(${u.uid}, '${u.user_id}', '${u.name.replace(/'/g, "\\'")}', ${u.device_id}, ${u.work_pattern_id || 'null'})" title="Edit User">
+                            <button class="btn btn-icon btn-blue" onclick="app.editUserFlow(${u.uid}, '${u.user_id}', '${(u.name || '').replace(/'/g, "\\'")}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices)))}', ${u.work_pattern_id || 'null'})" title="Edit User">
                                 <i class="fas fa-edit"></i>
                             </button>
-                            <button class="btn btn-icon btn-red" onclick="app.deleteUser(${u.uid}, '${u.user_id}', ${u.device_id})" title="Delete User">
+                            <button class="btn btn-icon btn-red" onclick="app.deleteUserFlow(${u.uid}, '${u.user_id}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices)))}')" title="Delete User">
                                 <i class="fas fa-trash"></i>
                             </button>
                         </div>
@@ -457,108 +523,10 @@ const app = {
         }).join('');
     },
 
-    async saveUser() {
-        const name = document.getElementById('user-name').value;
-        const userId = document.getElementById('user-id').value;
-        const devId = document.getElementById('user-target-device').value;
-        const role = document.getElementById('user-role').value;
-        const wpEl = document.getElementById('user-work-pattern');
-        const workPatternId = wpEl && wpEl.value ? parseInt(wpEl.value) : null;
-
-        const dev = this.devices.find(d => d.id == devId);
-        if (!dev) return;
-
-        this.showNotification('Saving user to device...', 'info');
-        
-        // If we're updating (btn text is Update) we use update-user, else create-user
-        const isUpdate = document.getElementById('user-submit-btn').innerText === 'Update User';
-        const endpoint = isUpdate ? 'update-user' : 'create-user';
-
-        const res = await window.electronAPI.invoke(endpoint, {
-            ip: dev.ip,
-            ports: [dev.port1, dev.port2],
-            uid: userId,
-            userId,
-            name,
-            role: parseInt(role),
-            work_pattern_id: workPatternId
-        });
-
-        if (res.success) {
-            this.showNotification('User saved successfully');
-            this.loadUsers();
-            this.resetUserForm();
-        } else {
-            this.showNotification('Error: ' + res.error, 'error');
-        }
-    },
-
-    editUser(uid, userId, name, devId, workPatternId = null) {
-        document.getElementById('user-name').value = name;
-        document.getElementById('user-id').value = uid;
-        document.getElementById('user-target-device').value = devId;
-        const wpEl = document.getElementById('user-work-pattern');
-        if (wpEl) wpEl.value = workPatternId || '';
-        document.getElementById('user-submit-btn').innerText = 'Update User';
-        document.getElementById('user-cancel-btn').style.display = 'block';
-        this.showNotification('Edit mode: Modify data and click Update', 'info');
-    },
-
-    resetUserForm() {
-        document.getElementById('add-user-form').reset();
-        const wpEl = document.getElementById('user-work-pattern');
-        if (wpEl) wpEl.value = '';
-        document.getElementById('user-submit-btn').innerText = 'Create User on Device';
-        document.getElementById('user-cancel-btn').style.display = 'none';
-    },
-
-
-
-    async syncAllLogsOnly() {
-        if (this.devices.length === 0) {
-            this.showNotification('No connected devices to sync!', 'error');
-            return;
-        }
-
-        const syncLogsBtn = document.getElementById('sync-logs-only-btn');
-        let oldHtml = '';
-        if (syncLogsBtn) {
-            syncLogsBtn.disabled = true;
-            oldHtml = syncLogsBtn.innerHTML;
-            syncLogsBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Syncing Logs...';
-        }
-
-        this.showNotification('Fetching attendance logs only (Lightning Fast)...', 'info');
-        let totalSynced = 0;
-        try {
-            for (const dev of this.devices) {
-                const res = await window.electronAPI.invoke('sync-logs-from-device', { ip: dev.ip, ports: [dev.port1, dev.port2] });
-                if (res.success) {
-                    totalSynced += res.logsCount || 0;
-                }
-            }
-            this.showNotification(`Successfully synchronized ${totalSynced} attendance logs!`);
-            await this.loadDashboardStats();
-
-            // Refresh current active page instantly
-            const activePage = document.querySelector('.page.active')?.id?.replace('-page', '');
-            if (activePage === 'logs') this.loadLogs();
-            if (activePage === 'users') this.loadUsers();
-        } catch (err) {
-            console.error(err);
-            this.showNotification('Failed to sync logs: ' + err.message, 'error');
-        } finally {
-            if (syncLogsBtn) {
-                syncLogsBtn.disabled = false;
-                syncLogsBtn.innerHTML = oldHtml;
-            }
-        }
-    },
-
     async syncAllUsers() {
         this.showNotification('Fetching all users from devices...', 'info');
         for (const dev of this.devices) {
-            await window.electronAPI.invoke('sync-users-from-device', { ip: dev.ip, ports: [dev.port1, dev.port2] });
+            await window.electronAPI.invoke('sync-users-from-device', { ip: dev.ip, ports: [dev.port1, dev.port2], deviceId: dev.id });
         }
         this.loadUsers();
         this.showNotification('Users updated from all devices');
@@ -570,11 +538,101 @@ const app = {
         for (const dev of this.devices) {
             const devUsers = users.filter(u => u.device_id == dev.id);
             if (devUsers.length > 0) {
-                await window.electronAPI.invoke('get-users-fingerprints', { ip: dev.ip, ports: [dev.port1, dev.port2], users: devUsers });
+                await window.electronAPI.invoke('get-users-fingerprints', { ip: dev.ip, ports: [dev.port1, dev.port2], users: devUsers, deviceId: dev.id });
             }
         }
         this.loadUsers();
         this.showNotification('Fingerprints synchronized');
+    },
+
+    promptDeviceSelection(title, devices) {
+        return new Promise((resolve) => {
+            if (!devices || devices.length === 0) {
+                this.showNotification('No devices available', 'error');
+                return resolve(null);
+            }
+            if (devices.length === 1) {
+                return resolve(devices[0].id.toString());
+            }
+
+            document.getElementById('device-selection-title').innerText = title;
+            const select = document.getElementById('device-selection-select');
+            select.innerHTML = devices.map(d => `<option value="${d.id}">${d.name} (${d.ip})</option>`).join('');
+            
+            document.getElementById('device-selection-modal').style.display = 'flex';
+            
+            const confirmBtn = document.getElementById('device-selection-confirm');
+            confirmBtn.onclick = () => {
+                document.getElementById('device-selection-modal').style.display = 'none';
+                resolve(select.value);
+            };
+
+            const cancelBtn = document.querySelector('#device-selection-modal .btn-secondary');
+            cancelBtn.onclick = () => {
+                document.getElementById('device-selection-modal').style.display = 'none';
+                resolve(null);
+            };
+        });
+    },
+
+    async enrollFingerFlow(uid, userId, devicesEncoded) {
+        try {
+            const devices = JSON.parse(decodeURIComponent(atob(devicesEncoded)));
+            const devId = await this.promptDeviceSelection('Select Device for Enrollment:', devices);
+            if (devId) {
+                this.enrollFinger(uid, userId, devId);
+            }
+        } catch (e) {
+            this.showNotification('Error enrolling finger: ' + e.message, 'error');
+        }
+    },
+    
+    async deleteUserFlow(uid, userId, devicesEncoded) {
+        try {
+            const devices = JSON.parse(decodeURIComponent(atob(devicesEncoded)));
+            const devId = await this.promptDeviceSelection('Select Device to Delete User From:', devices);
+            if (devId) {
+                this.deleteUser(uid, userId, devId);
+            }
+        } catch (e) {
+            this.showNotification('Error deleting user: ' + e.message, 'error');
+        }
+    },
+    
+    async editUserFlow(uid, userId, name, devicesEncoded, workPatternId) {
+        try {
+            const devices = JSON.parse(decodeURIComponent(atob(devicesEncoded)));
+            const devId = await this.promptDeviceSelection('Select Device to Edit:', devices);
+            if (devId) {
+                this.editUser(uid, userId, name, devId, workPatternId);
+            }
+        } catch (e) {
+            this.showNotification('Error editing user: ' + e.message, 'error');
+        }
+    },
+    
+    async deleteFingerDirectFlow(uid, userId, fingerIndex, devicesEncoded) {
+        try {
+            const devices = JSON.parse(decodeURIComponent(atob(devicesEncoded)));
+            const devId = await this.promptDeviceSelection('Select Device to Delete Finger From:', devices);
+            if (devId) {
+                this.deleteFingerDirect(uid, userId, devId, fingerIndex);
+            }
+        } catch (e) {
+            this.showNotification('Error: ' + e.message, 'error');
+        }
+    },
+    
+    async deleteAllFingersFlow(uid, userId, devicesEncoded) {
+        try {
+            const devices = JSON.parse(decodeURIComponent(atob(devicesEncoded)));
+            const devId = await this.promptDeviceSelection('Select Device to Clear All Fingerprints From:', devices);
+            if (devId) {
+                this.deleteAllFingers(uid, userId, devId);
+            }
+        } catch (e) {
+            this.showNotification('Error clearing fingers: ' + e.message, 'error');
+        }
     },
 
     enrollFinger(uid, userId, devId) {
@@ -586,7 +644,7 @@ const app = {
                 const dev = this.devices.find(d => d.id == devId);
                 if (dev) {
                     this.showNotification('Follow instructions on device sensor...', 'info');
-                    await window.electronAPI.invoke('enroll-fingerprint', { ip: dev.ip, ports: [dev.port1, dev.port2], uid, userId, fingerIndex });
+                    await window.electronAPI.invoke('enroll-fingerprint', { ip: dev.ip, ports: [dev.port1, dev.port2], uid, userId, fingerIndex, deviceId: dev.id });
                 }
             };
         });
@@ -600,7 +658,7 @@ const app = {
         const dev = this.devices.find(d => d.id == devId);
         if (dev) {
             this.showNotification('Clearing all fingerprints...', 'info');
-            const res = await window.electronAPI.invoke('delete-all-fingerprints', { ip: dev.ip, ports: [dev.port1, dev.port2], uid, userId });
+            const res = await window.electronAPI.invoke('delete-all-fingerprints', { ip: dev.ip, ports: [dev.port1, dev.port2], uid, userId, deviceId: dev.id });
             if (res.success) {
                 this.showNotification('All fingerprints cleared');
                 this.loadUsers();
@@ -618,7 +676,7 @@ const app = {
         const dev = this.devices.find(d => d.id == devId);
         if (dev) {
             this.showNotification(`Deleting finger ${fingerIndex}...`, 'info');
-            const res = await window.electronAPI.invoke('delete-user-fingerprint', { ip: dev.ip, ports: [dev.port1, dev.port2], uid, userId, fingerIndex });
+            const res = await window.electronAPI.invoke('delete-user-fingerprint', { ip: dev.ip, ports: [dev.port1, dev.port2], uid, userId, fingerIndex, deviceId: dev.id });
             if (res.success) {
                 this.showNotification(`Finger ${fingerIndex} deleted`);
                 this.loadUsers();
@@ -632,10 +690,122 @@ const app = {
         if (confirm(`Delete user ${userId} from device?`)) {
             const dev = this.devices.find(d => d.id == devId);
             if (dev) {
-                const res = await window.electronAPI.invoke('delete-user', { ip: dev.ip, ports: [dev.port1, dev.port2], uid, userId });
+                const res = await window.electronAPI.invoke('delete-user', { ip: dev.ip, ports: [dev.port1, dev.port2], uid, userId, deviceId: dev.id });
                 if (res.success) { this.loadUsers(); this.showNotification('User deleted'); }
             }
         }
+    },
+
+    async saveUser() {
+        const name = document.getElementById('user-name').value;
+        const userId = document.getElementById('user-id').value;
+        const role = document.getElementById('user-role').value;
+        const wpEl = document.getElementById('user-work-pattern');
+        let workPatternId = wpEl ? wpEl.value : null;
+        if (workPatternId === "") workPatternId = null;
+
+        let uid = null;
+        const uidEl = document.getElementById('user-uid');
+        if (uidEl && uidEl.value) uid = uidEl.value;
+
+        // In Hybrid mode, device selection is via checkboxes
+        const deviceCheckboxes = document.querySelectorAll('#user-target-devices-container input[type="checkbox"]:checked');
+        let deviceIds = [];
+        
+        if (deviceCheckboxes.length > 0) {
+            deviceIds = Array.from(deviceCheckboxes).map(cb => parseInt(cb.value));
+        } else {
+            // Fallback to select if checkboxes are not used (just in case)
+            const selectEl = document.getElementById('user-target-device');
+            if (selectEl && selectEl.value) {
+                deviceIds = [parseInt(selectEl.value)];
+            }
+        }
+
+        if (deviceIds.length === 0) {
+            this.showNotification('Please select at least one device', 'error');
+            return;
+        }
+
+        this.showNotification('Saving user...', 'info');
+
+        const isEdit = !!uid;
+        let success = true;
+
+        for (const devId of deviceIds) {
+            const dev = this.devices.find(d => d.id == devId);
+            if (!dev) continue;
+
+            const res = await window.electronAPI.invoke(isEdit ? 'update-user' : 'create-user', { 
+                ip: dev.ip, 
+                ports: [dev.port1, dev.port2], 
+                uid: isEdit ? parseInt(uid) : null, 
+                userId, 
+                name, 
+                role, 
+                password: '', 
+                deviceId: dev.id,
+                work_pattern_id: workPatternId 
+            });
+
+            if (!res.success) {
+                success = false;
+                this.showNotification(`Failed on ${dev.name}: ` + res.error, 'error');
+            }
+        }
+
+        if (success) {
+            this.showNotification(isEdit ? 'User updated successfully!' : 'User created successfully!');
+            this.resetUserForm();
+            this.loadUsers();
+        }
+    },
+
+    editUser(uid, userId, name, deviceId, workPatternId) {
+        document.getElementById('user-name').value = name;
+        document.getElementById('user-id').value = userId;
+        
+        let uidEl = document.getElementById('user-uid');
+        if (!uidEl) {
+            uidEl = document.createElement('input');
+            uidEl.type = 'hidden';
+            uidEl.id = 'user-uid';
+            document.getElementById('add-user-form').appendChild(uidEl);
+        }
+        uidEl.value = uid;
+        
+        const wpEl = document.getElementById('user-work-pattern');
+        if (wpEl) wpEl.value = workPatternId || "";
+        
+        const selectEl = document.getElementById('user-target-device');
+        if (selectEl) {
+            selectEl.value = deviceId;
+        }
+
+        const submitBtn = document.getElementById('user-submit-btn');
+        if (submitBtn) submitBtn.innerText = 'Update User';
+        
+        const cancelBtn = document.getElementById('user-cancel-btn');
+        if (cancelBtn) cancelBtn.style.display = 'inline-block';
+        
+        this.showPage('users'); // Ensure we are on the users page, form is at the top
+        document.getElementById('add-user-form').scrollIntoView({ behavior: 'smooth' });
+    },
+
+    resetUserForm() {
+        const form = document.getElementById('add-user-form');
+        if (form) form.reset();
+        
+        const uidEl = document.getElementById('user-uid');
+        if (uidEl) uidEl.value = '';
+        
+        const submitBtn = document.getElementById('user-submit-btn');
+        if (submitBtn) submitBtn.innerText = 'Create User on Device';
+        
+        const cancelBtn = document.getElementById('user-cancel-btn');
+        if (cancelBtn) cancelBtn.style.display = 'none';
+        
+        this.updateDeviceSelects(); // resets checkboxes to all checked
     },
 
     async addDevice() {

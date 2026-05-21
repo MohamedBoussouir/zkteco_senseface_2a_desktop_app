@@ -16,7 +16,7 @@ function setupIpcHandlers(mainWindow) {
 
     // Devices
     ipcMain.handle('get-devices', async () => db('devices').select('*'));
-    ipcMain.handle('test-device-connection', async (event, { ip, ports }) => {
+    ipcMain.handle('test-device-connection', async (event, { ip, ports, deviceId }) => {
         try {
             return await withLock(ip, ports, async (zk) => ({ success: true }));
         } catch (e) {
@@ -38,25 +38,78 @@ function setupIpcHandlers(mainWindow) {
     });
 
     // Device Actions
-    ipcMain.handle('reboot-device', async (event, { ip, ports }) => rebootDevice(ip, ports));
-    ipcMain.handle('sync-time', async (event, { ip, ports }) => syncTime(ip, ports));
-    ipcMain.handle('clear-device-admin', async (event, { ip, ports }) => clearAdmin(ip, ports));
-    ipcMain.handle('beep-device', async (event, { ip, ports }) => beep(ip, ports));
+    ipcMain.handle('reboot-device', async (event, { ip, ports, deviceId }) => rebootDevice(ip, ports));
+    ipcMain.handle('sync-time', async (event, { ip, ports, deviceId }) => syncTime(ip, ports));
+    ipcMain.handle('clear-device-admin', async (event, { ip, ports, deviceId }) => clearAdmin(ip, ports));
+    ipcMain.handle('beep-device', async (event, { ip, ports, deviceId }) => beep(ip, ports));
     ipcMain.handle('emergency-stop', async (event, { ip }) => {
         abortEnrollment(ip);
         return { success: true };
     });
 
-    // Users
-    const getUsersQuery = () => db('users')
-        .leftJoin('work_patterns', 'users.work_pattern_id', 'work_patterns.id')
-        .select('users.*', 'work_patterns.name as pattern_name');
+    const getUsersQuery = async () => {
+        const rawUsers = await db('users')
+            .leftJoin('work_patterns', 'users.work_pattern_id', 'work_patterns.id')
+            .leftJoin('devices', 'users.device_id', 'devices.id')
+            .select(
+                'users.user_id',
+                db.raw('MAX(users.uid) as uid'),
+                db.raw('MAX(users.name) as name'),
+                db.raw('MAX(users.role) as role'),
+                db.raw('MAX(users.work_pattern_id) as work_pattern_id'),
+                db.raw('MAX(work_patterns.name) as pattern_name'),
+                db.raw("GROUP_CONCAT(users.fingerprints, '|||') as all_fingerprints"),
+                db.raw("GROUP_CONCAT(devices.id, '|||') as device_ids"),
+                db.raw("GROUP_CONCAT(devices.name, '|||') as device_names"),
+                db.raw("GROUP_CONCAT(devices.ip, '|||') as device_ips")
+            )
+            .groupBy('users.user_id');
+
+        return rawUsers.map(u => {
+            // merge fingerprints visually
+            let mergedIndices = new Set();
+            if (u.all_fingerprints) {
+                u.all_fingerprints.split('|||').forEach(fpStr => {
+                    try {
+                        const fp = JSON.parse(fpStr);
+                        if (fp && Array.isArray(fp.indices)) {
+                            fp.indices.forEach(idx => mergedIndices.add(idx));
+                        }
+                    } catch (e) {}
+                });
+            }
+            
+            u.fingerprints = JSON.stringify({
+                count: mergedIndices.size,
+                indices: Array.from(mergedIndices)
+            });
+
+            // parse devices
+            const ids = u.device_ids ? u.device_ids.split('|||') : [];
+            const names = u.device_names ? u.device_names.split('|||') : [];
+            const ips = u.device_ips ? u.device_ips.split('|||') : [];
+            
+            const devicesArr = [];
+            for (let i = 0; i < ids.length; i++) {
+                if (ids[i]) {
+                    devicesArr.push({ 
+                        id: parseInt(ids[i]), 
+                        name: names[i] || 'Unknown', 
+                        ip: ips[i] || '0.0.0.0' 
+                    });
+                }
+            }
+            u.assigned_devices = devicesArr;
+            
+            return u;
+        });
+    };
 
     ipcMain.handle('get-local-users', async () => getUsersQuery());
     ipcMain.handle('get-users', async () => getUsersQuery()); // Support both names
-    ipcMain.handle('fetch-device-users', async (event, { ip, ports }) => {
+    ipcMain.handle('fetch-device-users', async (event, { ip, ports, deviceId }) => {
         try {
-            const device = await db('devices').where('ip', ip).first();
+            const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
             if (!device) throw new Error('Device not found');
             return await withLock(ip, ports, async (zk) => {
                 const count = await syncUsersFromDevice(zk, device.id);
@@ -147,13 +200,13 @@ function setupIpcHandlers(mainWindow) {
         }
     });
 
-    ipcMain.handle('create-user', async (event, { ip, ports, uid, userId, name, role, work_pattern_id, user }) => {
+    ipcMain.handle('create-user', async (event, { ip, ports, uid, userId, name, role, work_pattern_id, user, deviceId }) => {
         // Handle both object-style and flat-style parameters
         const userData = user || { uid, userId, name, role, work_pattern_id };
 
         const res = await createUser(ip, ports, userData);
         if (res.success) {
-            const device = await db('devices').where('ip', ip).first();
+            const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
             if (device) {
                 await db('users').insert({
                     uid: userData.uid,
@@ -169,14 +222,15 @@ function setupIpcHandlers(mainWindow) {
         return res;
     });
 
-    ipcMain.handle('update-user', async (event, { ip, ports, uid, userId, name, role, work_pattern_id }) => {
-        const userData = { uid, userId, name, role };
+    ipcMain.handle('update-user', async (event, { ip, ports, uid, userId, name, role, work_pattern_id, deviceId }) => {
+        const userData = { uid, userId, name, role, work_pattern_id };
         const res = await createUser(ip, ports, userData);
         if (res.success) {
-            const device = await db('devices').where('ip', ip).first();
+            const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
             if (device) {
                 await db('users').where({ user_id: userId.toString(), device_id: device.id }).update({
                     name: name,
+                    role: role || 0,
                     work_pattern_id: work_pattern_id || null
                 });
             }
@@ -184,15 +238,15 @@ function setupIpcHandlers(mainWindow) {
         return res;
     });
 
-    ipcMain.handle('delete-user', async (event, { ip, ports, uid, userId }) => deleteUser(ip, ports, uid, userId));
-    ipcMain.handle('delete-user-finger', async (event, { ip, ports, uid, userId, fingerIndex }) => {
+    ipcMain.handle('delete-user', async (event, { ip, ports, uid, userId, deviceId }) => deleteUser(ip, ports, uid, userId));
+    ipcMain.handle('delete-user-finger', async (event, { ip, ports, uid, userId, fingerIndex, deviceId }) => {
         const fIdx = parseInt(fingerIndex);
         console.log(`[IPC] Deleting finger ${fIdx} for User ${userId} (UID: ${uid}) on ${ip}`);
         return deleteFinger(ip, ports, uid, userId, fIdx);
     });
 
     // Fingerprints
-    ipcMain.handle('enroll-fingerprint', async (event, { ip, ports, uid, userId, fingerIndex }) => {
+    ipcMain.handle('enroll-fingerprint', async (event, { ip, ports, uid, userId, fingerIndex, deviceId }) => {
         return enrollFingerprint(ip, ports, uid, userId, fingerIndex, mainWindow);
     });
     ipcMain.handle('abort-enrollment', async (event, { ip }) => {
@@ -200,9 +254,9 @@ function setupIpcHandlers(mainWindow) {
         return { success: true };
     });
 
-    ipcMain.handle('sync-users-from-device', async (event, { ip, ports }) => {
+    ipcMain.handle('sync-users-from-device', async (event, { ip, ports, deviceId }) => {
         return await withLock(ip, ports, async (zk) => {
-            const device = await db('devices').where('ip', ip).first();
+            const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
             if (!device) return { success: false, error: 'Device not found' };
 
             // 1. Sync users using the central helper (performs obsolete user & log cleanup)
@@ -248,9 +302,9 @@ function setupIpcHandlers(mainWindow) {
         });
     });
 
-    ipcMain.handle('sync-logs-from-device', async (event, { ip, ports }) => {
+    ipcMain.handle('sync-logs-from-device', async (event, { ip, ports, deviceId }) => {
         return await withLock(ip, ports, async (zk) => {
-            const device = await db('devices').where('ip', ip).first();
+            const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
             if (!device) return { success: false, error: 'Device not found' };
 
             let logsCount = 0;
@@ -289,7 +343,7 @@ function setupIpcHandlers(mainWindow) {
 
     ipcMain.handle('get-users-fingerprints', async (event, { ip, ports, users }) => {
         return await withLock(ip, ports, async (zk) => {
-            const device = await db('devices').where('ip', ip).first();
+            const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
             if (!device) return { success: false, error: 'Device not found' };
 
             console.log(`[Sync-Bio] Starting FAST BULK sync for ${users.length} users...`);
@@ -348,10 +402,10 @@ function setupIpcHandlers(mainWindow) {
         });
     });
 
-    ipcMain.handle('delete-user-fingerprint', async (event, { ip, ports, uid, userId, fingerIndex }) => {
+    ipcMain.handle('delete-user-fingerprint', async (event, { ip, ports, uid, userId, fingerIndex, deviceId }) => {
         const res = await deleteFinger(ip, ports, uid, userId, fingerIndex);
         if (res.success) {
-            const device = await db('devices').where('ip', ip).first();
+            const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
             if (device) {
                 const user = await db('users').where({ user_id: userId, device_id: device.id }).first();
                 if (user && user.fingerprints) {
@@ -369,10 +423,10 @@ function setupIpcHandlers(mainWindow) {
         return res;
     });
 
-    ipcMain.handle('delete-all-fingerprints', async (event, { ip, ports, uid, userId }) => {
+    ipcMain.handle('delete-all-fingerprints', async (event, { ip, ports, uid, userId, deviceId }) => {
         const res = await deleteAllFingers(ip, ports, uid, userId);
         if (res.success) {
-            const device = await db('devices').where('ip', ip).first();
+            const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
             if (device) {
                 await db('users')
                     .where({ user_id: userId, device_id: device.id })

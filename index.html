@@ -181,7 +181,7 @@
                         </div>
                         <div class="form-group" style="margin-bottom: 0;">
                             <label>Target Device</label>
-                            <select id="user-target-device"></select>
+                            <select id="user-target-device" required></select>
                         </div>
                         <div class="form-group" style="margin-bottom: 0;">
                             <label>Role</label>
@@ -211,7 +211,7 @@
                     <div style="display:flex; gap:10px; align-items: center;">
                         <div class="search-box" style="position: relative; width: 250px;">
                             <i class="fas fa-search" style="position: absolute; left: 15px; top: 50%; transform: translateY(-50%); color: var(--text-muted); font-size: 0.9rem;"></i>
-                            <input type="text" id="users-search" placeholder="Search employees..." style="background: rgba(0,0,0,0.2); color: var(--text-main); border: 1px solid var(--glass-border); padding: 10px 15px 10px 40px; border-radius: 12px; font-size: 0.9rem; width: 100%; outline: none; transition: border-color 0.3s;" onfocus="this.style.borderColor='var(--accent-primary)'" onblur="this.style.borderColor='var(--glass-border)'">
+                            <input type="text" id="users-search" placeholder="Search employees..." style="background: rgba(0,0,0,0.2); color: var(--text-main); border: 1px solid var(--glass-border); padding: 10px 15px 10px 40px; border-radius: 12px; font-size: 0.9rem; width: 100%; outline: none; transition: border-color 0.3s;" onfocus="this.style.borderColor='var(--accent-primary)'" onblur="this.style.borderColor='var(--glass-border)'" oninput="app.handleUsersSearch(this.value)">
                         </div>
                         <button class="btn btn-secondary" onclick="app.syncAllUsers()"><i class="fas fa-download"></i> Fetch All</button>
                         <button class="btn btn-secondary" onclick="app.syncAllBio()"><i class="fas fa-fingerprint"></i> Sync Bio</button>
@@ -223,6 +223,7 @@
                             <tr>
                                 <th>Name</th>
                                 <th>ID</th>
+                                <th>Device</th>
                                 <th>Role</th>
                                 <th>Work Pattern</th>
                                 <th>Bio Status</th>
@@ -233,6 +234,19 @@
                             <!-- Data injection -->
                         </tbody>
                     </table>
+                </div>
+                
+                <!-- Users Pagination Controls -->
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 15px; padding: 0 5px;">
+                    <div style="color: var(--text-muted); font-size: 0.85rem;" id="users-page-info">Showing 0 to 0 of 0 entries</div>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn btn-secondary" style="padding: 6px 14px; font-size: 0.85rem;" onclick="app.prevUsersPage()">
+                            <i class="fas fa-chevron-left"></i> Prev
+                        </button>
+                        <button class="btn btn-secondary" style="padding: 6px 14px; font-size: 0.85rem;" onclick="app.nextUsersPage()">
+                            Next <i class="fas fa-chevron-right"></i>
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -820,6 +834,21 @@
                 <button class="btn btn-secondary finger-btn" data-idx="9">F9</button>
             </div>
             <button class="btn btn-red btn-full" id="cancel-enroll-btn">Cancel</button>
+        </div>
+    </div>
+
+    <!-- Device Selection Modal -->
+    <div id="device-selection-modal" class="modal" style="display: none; align-items: center; justify-content: center; z-index: 9999;">
+        <div class="modal-content" style="width: 400px; background: #101223; border: 1px solid var(--glass-border); padding: 30px; border-radius: 20px; box-shadow: var(--shadow-lg);">
+            <h2 id="device-selection-title" style="font-weight: 600; font-size: 1.4rem; margin-bottom: 20px; text-align: center;">Select Target Device</h2>
+            <div class="form-group mb-4">
+                <label style="font-size: 0.9rem; color: var(--text-muted); display: block; margin-bottom: 8px;">Target Device</label>
+                <select id="device-selection-select" style="width: 100%;"></select>
+            </div>
+            <div class="flex" style="gap: 10px; margin-top: 25px;">
+                <button class="btn btn-secondary flex-1" onclick="app.hideModal('device-selection-modal')">Cancel</button>
+                <button class="btn btn-primary flex-1" id="device-selection-confirm">Confirm</button>
+            </div>
         </div>
     </div>
 

@@ -42,6 +42,9 @@ async function initDb() {
         }
     }
 
+    // Clean up user_devices from previous experimental many-to-many setup
+    await db.schema.dropTableIfExists('user_devices');
+
     // Attendance Table
     const hasAttendance = await db.schema.hasTable('attendance');
     if (!hasAttendance) {
