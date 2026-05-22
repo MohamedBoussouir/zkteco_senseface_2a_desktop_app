@@ -51,7 +51,7 @@ async function syncUsersFromDevice(zk, deviceId) {
     // 1. Identify users currently on the device
     const deviceUserIds = [];
     for (const user of uData) {
-        const cleanUserId = (user.userId || '').replace(/[^\x20-\x7E]/g, '').trim();
+        const cleanUserId = String(user.userId || '').replace(/[^\x20-\x7E]/g, '').trim();
         if (cleanUserId) {
             deviceUserIds.push(cleanUserId);
         }
@@ -72,8 +72,8 @@ async function syncUsersFromDevice(zk, deviceId) {
     
     // 3. Upsert current users
     for (const user of uData) {
-        const cleanName = (user.name || '').replace(/[^\x20-\x7E\u0600-\u06FF]/g, '').trim();
-        const cleanUserId = (user.userId || '').replace(/[^\x20-\x7E]/g, '').trim();
+        const cleanName = String(user.name || '').replace(/[^\x20-\x7E\u0600-\u06FF]/g, '').trim();
+        const cleanUserId = String(user.userId || '').replace(/[^\x20-\x7E]/g, '').trim();
         if (!cleanUserId) continue;
 
         await db('users').insert({

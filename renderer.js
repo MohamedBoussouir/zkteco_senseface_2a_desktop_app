@@ -542,7 +542,7 @@ const app = {
         this.showNotification('Syncing fingerprints from devices...', 'info');
         const users = await window.electronAPI.invoke('get-local-users');
         for (const dev of this.devices) {
-            const devUsers = users.filter(u => u.device_id == dev.id);
+            const devUsers = users.filter(u => u.assigned_devices && u.assigned_devices.some(d => d.id == dev.id));
             if (devUsers.length > 0) {
                 await window.electronAPI.invoke('get-users-fingerprints', { ip: dev.ip, ports: [dev.port1, dev.port2], users: devUsers, deviceId: dev.id });
             }

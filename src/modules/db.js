@@ -23,6 +23,7 @@ async function initDb() {
             table.integer('role');
             table.integer('device_id');
             table.text('fingerprints'); // JSON array
+            table.integer('work_pattern_id').unsigned().references('id').inTable('work_patterns').onDelete('SET NULL');
             table.unique(['user_id', 'device_id']);
         });
     } else {

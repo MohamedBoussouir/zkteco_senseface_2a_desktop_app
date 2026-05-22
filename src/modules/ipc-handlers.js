@@ -341,7 +341,7 @@ function setupIpcHandlers(mainWindow) {
         });
     });
 
-    ipcMain.handle('get-users-fingerprints', async (event, { ip, ports, users }) => {
+    ipcMain.handle('get-users-fingerprints', async (event, { ip, ports, users, deviceId }) => {
         return await withLock(ip, ports, async (zk) => {
             const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
             if (!device) return { success: false, error: 'Device not found' };
