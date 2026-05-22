@@ -20,6 +20,21 @@ const app = {
     currentFilteredReport: [],
 
     async init() {
+        const licenseStatus = await window.securityAPI.verifyLicenseStatus();
+        if (!licenseStatus.valid) {
+            const res = await window.electronAPI.invoke('get-machine-id');
+            const midInput = document.getElementById('activation-mid');
+            if (midInput) midInput.value = res.mid || 'UNKNOWN_MID';
+
+            const errorMsg = document.getElementById('activation-error-msg');
+            if (errorMsg) errorMsg.innerText = licenseStatus.message;
+
+            const modal = document.getElementById('activation-modal');
+            if (modal) modal.style.display = 'flex';
+            // Stop initialization if license is invalid
+            return;
+        }
+
         this.loadSavedLanguage();
         await this.loadDefaultShiftSettings();
         this.bindEvents();
@@ -70,19 +85,6 @@ const app = {
                 await this.saveWorkPattern();
             };
         }
-
-        // Listen to license validation errors from main process
-        window.electronAPI.on('license-error', async (msg) => {
-            const res = await window.electronAPI.invoke('get-machine-id');
-            const midInput = document.getElementById('activation-mid');
-            if (midInput) midInput.value = res.mid || 'UNKNOWN_MID';
-
-            const errorMsg = document.getElementById('activation-error-msg');
-            if (errorMsg) errorMsg.innerText = msg;
-
-            const modal = document.getElementById('activation-modal');
-            if (modal) modal.style.display = 'flex';
-        });
 
         // الفحص التلقائي للمستخدمين والبصمات عند الدخول
         setTimeout(async () => {

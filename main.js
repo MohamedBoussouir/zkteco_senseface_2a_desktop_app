@@ -27,11 +27,19 @@ async function createWindow() {
 
     mainWindow.loadFile('index.html');
     
-    // Check License on startup
-    const license = licensing.verifyLicense();
-    if (!license.valid) {
-        mainWindow.webContents.on('did-finish-load', () => {
-            mainWindow.webContents.send('license-error', license.message);
+    // Security: Block DevTools shortcuts in production
+    const isDev = process.env.NODE_ENV === 'development';
+    if (!isDev) {
+        mainWindow.removeMenu();
+        mainWindow.webContents.on('before-input-event', (event, input) => {
+            if (
+                (input.control && input.shift && input.key.toLowerCase() === 'i') ||
+                (input.meta && input.shift && input.key.toLowerCase() === 'i') ||
+                (input.key === 'F12')
+            ) {
+                event.preventDefault();
+                console.warn('DevTools shortcut blocked.');
+            }
         });
     }
 
@@ -41,6 +49,16 @@ async function createWindow() {
     // Start Background Tasks
     startBackgroundSync(mainWindow);
 }
+
+// Security: License Check IPC
+ipcMain.handle('check-license', async () => {
+    try {
+        const result = licensing.verifyLicense();
+        return result;
+    } catch (e) {
+        return { valid: false, message: 'License check failed.' };
+    }
+});
 
 app.whenReady().then(async () => {
     await initDb();

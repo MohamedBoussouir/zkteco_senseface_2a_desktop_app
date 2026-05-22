@@ -6,22 +6,35 @@ const path = require('path');
 class LicensingManager {
     constructor(secretKey = 'HS_ZK_SECRET_KEY_2026') {
         this.secretKey = crypto.createHash('sha256').update(secretKey).digest();
-        this.iv = Buffer.alloc(16, 0);
-        this.licensePath = path.join(process.cwd(), 'license.dat');
-        this.timeTrackPath = path.join(process.cwd(), '.sys_cache.dat');
+        this.licensePath = path.join(process.cwd(), 'license.json');
+        this.timeTrackPath = path.join(process.cwd(), '.sys_cache.json');
     }
 
     encrypt(text) {
-        const cipher = crypto.createCipheriv('aes-256-cbc', this.secretKey, this.iv);
+        const iv = crypto.randomBytes(16);
+        const cipher = crypto.createCipheriv('aes-256-gcm', this.secretKey, iv);
         let encrypted = cipher.update(text, 'utf8', 'hex');
         encrypted += cipher.final('hex');
-        return encrypted;
+        const authTag = cipher.getAuthTag().toString('hex');
+        return JSON.stringify({
+            iv: iv.toString('hex'),
+            content: encrypted,
+            authTag: authTag
+        });
     }
 
-    decrypt(hex) {
+    decrypt(encryptedJsonStr) {
         try {
-            const decipher = crypto.createDecipheriv('aes-256-cbc', this.secretKey, this.iv);
-            let decrypted = decipher.update(hex, 'hex', 'utf8');
+            const encryptedData = JSON.parse(encryptedJsonStr);
+            if (!encryptedData.iv || !encryptedData.content || !encryptedData.authTag) return null;
+
+            const iv = Buffer.from(encryptedData.iv, 'hex');
+            const authTag = Buffer.from(encryptedData.authTag, 'hex');
+            
+            const decipher = crypto.createDecipheriv('aes-256-gcm', this.secretKey, iv);
+            decipher.setAuthTag(authTag);
+
+            let decrypted = decipher.update(encryptedData.content, 'hex', 'utf8');
             decrypted += decipher.final('utf8');
             return decrypted;
         } catch (e) {
