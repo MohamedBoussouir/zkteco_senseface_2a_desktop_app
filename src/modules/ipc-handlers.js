@@ -673,10 +673,23 @@ function setupIpcHandlers(mainWindow) {
             endDate = endDateParam;
         }
 
-        const users = await db('users').select('user_id', 'name', 'work_pattern_id');
+        const rawUsers = await db('users').select('user_id', 'name', 'work_pattern_id').orderBy('work_pattern_id', 'desc');
+        const usersMap = new Map();
+        for (const u of rawUsers) {
+            if (!usersMap.has(u.user_id)) {
+                usersMap.set(u.user_id, u);
+            } else if (!usersMap.get(u.user_id).work_pattern_id && u.work_pattern_id) {
+                usersMap.set(u.user_id, u); // Prefer entry with assigned work pattern
+            }
+        }
+        const users = Array.from(usersMap.values());
+        const endDateTime = new Date(`${endDate}T23:59:59.999Z`);
+        endDateTime.setDate(endDateTime.getDate() + 1);
+        const endDatePlusOne = endDateTime.toISOString().split('T')[0];
+
         const logs = await db('attendance')
             .where('timestamp', '>=', startDate)
-            .andWhere('timestamp', '<=', `${endDate}T23:59:59.999Z`)
+            .andWhere('timestamp', '<=', `${endDatePlusOne}T23:59:59.999Z`)
             .select('*');
         const schedules = await db('schedules')
             .where('date', '>=', startDate)
@@ -734,18 +747,23 @@ function setupIpcHandlers(mainWindow) {
                 let isOffDay = false;
                 let shiftName = '';
 
+                let foundShiftInSchedule = false;
                 if (userSchedule) {
                     if (userSchedule.is_off_day) {
                         isOffDay = true;
+                        foundShiftInSchedule = true;
                     } else if (userSchedule.shift_id) {
                         const shift = shifts.find(s => s.id === userSchedule.shift_id);
                         if (shift) {
                             expectedStart = shift.start_time;
                             expectedEnd = shift.end_time;
                             shiftName = shift.name;
+                            foundShiftInSchedule = true;
                         }
                     }
-                } else if (user.work_pattern_id) {
+                } 
+                
+                if (!foundShiftInSchedule && user.work_pattern_id) {
                     const dOfWeek = new Date(currentDate).getDay();
                     const patternDay = workPatternDays.find(p => p.pattern_id === user.work_pattern_id && p.day_of_week === dOfWeek);
                     if (patternDay) {
@@ -762,7 +780,29 @@ function setupIpcHandlers(mainWindow) {
                     }
                 }
 
-                const dayLogs = userLogs.filter(l => l.timestamp.startsWith(currentDate));
+                const startMin = parseTimeStr(expectedStart);
+                const endMin = parseTimeStr(expectedEnd);
+                const isNightShift = endMin < startMin;
+                
+                let dayLogs = [];
+                if (isNightShift) {
+                    const nextDate = new Date(currentDate);
+                    nextDate.setDate(nextDate.getDate() + 1);
+                    const nextDateStr = nextDate.toISOString().split('T')[0];
+                    
+                    dayLogs = userLogs.filter(l => {
+                         if (l.timestamp.startsWith(currentDate)) {
+                             const m = getMinutes(l.timestamp);
+                             return m >= startMin - 300; // up to 5 hours before shift
+                         } else if (l.timestamp.startsWith(nextDateStr)) {
+                             const m = getMinutes(l.timestamp);
+                             return m <= endMin + 360; // up to 6 hours after shift ends
+                         }
+                         return false;
+                    });
+                } else {
+                    dayLogs = userLogs.filter(l => l.timestamp.startsWith(currentDate));
+                }
 
                 if (isOffDay) {
                     offDaysCount++;
@@ -815,18 +855,20 @@ function setupIpcHandlers(mainWindow) {
                         const first = dayLogs[0].timestamp;
                         const last = dayLogs[dayLogs.length - 1].timestamp;
 
-                        const firstMin = getMinutes(first);
-                        const startMin = parseTimeStr(expectedStart);
                         const diffMs = new Date(last) - new Date(first);
                         const hoursWorked = (diffMs / (1000 * 60 * 60)).toFixed(2);
                         const hoursWorkedNum = parseFloat(hoursWorked) || 0;
                         totalWorkedHrs += hoursWorkedNum;
 
+                        const firstPunchDate = new Date(first);
+                        const expectedStartDate = new Date(`${currentDate}T${expectedStart}:00`);
+                        
                         let delayVal = 0;
                         let delayStr = '--';
                         let status = 'On Time';
-                        if (firstMin > startMin) {
-                            delayVal = firstMin - startMin;
+                        
+                        if (firstPunchDate > expectedStartDate) {
+                            delayVal = Math.floor((firstPunchDate - expectedStartDate) / 60000);
                             delayStr = `+${delayVal} mins`;
                             status = 'Late';
                             lateDays++;

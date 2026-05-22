@@ -661,6 +661,19 @@
                         </tbody>
                     </table>
                 </div>
+
+                <!-- Late Report Pagination Controls -->
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 15px; padding: 0 5px;">
+                    <div style="color: var(--text-muted); font-size: 0.85rem;" id="reports-page-info">Showing 0 to 0 of 0 entries</div>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn btn-secondary" style="padding: 6px 14px; font-size: 0.85rem;" onclick="app.prevReportsPage()">
+                            <i class="fas fa-chevron-left"></i> Prev
+                        </button>
+                        <button class="btn btn-secondary" style="padding: 6px 14px; font-size: 0.85rem;" onclick="app.nextReportsPage()">
+                            Next <i class="fas fa-chevron-right"></i>
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
 

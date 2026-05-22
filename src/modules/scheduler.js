@@ -16,7 +16,11 @@ async function startBackgroundSync(mainWindow) {
                 try {
                     await withLock(device.ip, [device.port1, device.port2], async (zk) => {
                         console.log(`[Sync] Smart Quick-Sync started for ${device.ip}...`);
-                        await syncUsersFromDevice(zk, device.id);
+                        try {
+                            await syncUsersFromDevice(zk, device.id);
+                        } catch (e) {
+                            console.error(`[Sync] Skipping users fetch for ${device.ip} due to timeout:`, e.message);
+                        }
                         const logs = await zk.getAttendances();
                         const lData = Array.isArray(logs) ? logs : (logs.data || []);
                         for (const log of lData) {

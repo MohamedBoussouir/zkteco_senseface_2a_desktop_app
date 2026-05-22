@@ -14,6 +14,10 @@ const app = {
     logsSearchQuery: '',
     logsFilterDate: '',
     logsSearchTimeout: null,
+    
+    reportsPage: 1,
+    reportsPerPage: 15,
+    currentFilteredReport: [],
 
     async init() {
         this.loadSavedLanguage();
@@ -543,6 +547,33 @@ const app = {
         }
         this.loadUsers();
         this.showNotification('Fingerprints synchronized');
+    },
+
+    async syncAllLogsOnly() {
+        this.showNotification('Fast syncing logs from devices...', 'info');
+        const btn = document.getElementById('sync-logs-only-btn');
+        let oldHtml = '';
+        if (btn) {
+            btn.disabled = true;
+            oldHtml = btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Syncing...';
+        }
+        try {
+            for (const dev of this.devices) {
+                await window.electronAPI.invoke('sync-logs-from-device', { ip: dev.ip, ports: [dev.port1, dev.port2], deviceId: dev.id });
+            }
+            this.currentLogPage = 1;
+            this.loadLogs();
+            this.showNotification('Logs synced successfully');
+        } catch (err) {
+            console.error(err);
+            this.showNotification('Error syncing logs', 'error');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = oldHtml;
+            }
+        }
     },
 
     promptDeviceSelection(title, devices) {
@@ -1351,7 +1382,9 @@ const app = {
             const filterSelect = document.getElementById('report-status-filter');
             if (filterSelect) filterSelect.value = 'all';
 
-            this.renderLateReportTable(this.currentReport);
+            this.reportsPage = 1;
+            this.currentFilteredReport = this.currentReport;
+            this.renderLateReportTable();
             this.calculateAndRenderKPIs(this.currentReport, mode);
         } catch (err) {
             console.error(err);
@@ -1458,22 +1491,40 @@ const app = {
         `;
     },
 
-    renderLateReportTable(reportData) {
+    renderLateReportTable(reportData = this.currentFilteredReport) {
         const tbody = document.querySelector('#late-report-table tbody');
         if (!tbody) return;
 
         const trans = this.translations[this.currentLang || 'en'] || this.translations.en;
+        
+        const infoEl = document.getElementById('reports-page-info');
 
         if (!reportData || reportData.length === 0) {
             tbody.innerHTML = `<tr><td colspan="8" class="text-center p-4 text-slate-500">${trans.no_records}</td></tr>`;
+            if (infoEl) infoEl.innerText = 'Showing 0 to 0 of 0 entries';
             return;
+        }
+
+        const totalItems = reportData.length;
+        const totalPages = Math.ceil(totalItems / this.reportsPerPage) || 1;
+        
+        if (this.reportsPage > totalPages) this.reportsPage = totalPages;
+        if (this.reportsPage < 1) this.reportsPage = 1;
+
+        const startIndex = (this.reportsPage - 1) * this.reportsPerPage;
+        const endIndex = Math.min(startIndex + this.reportsPerPage, totalItems);
+        
+        const currentData = reportData.slice(startIndex, endIndex);
+
+        if (infoEl) {
+            infoEl.innerText = `Showing ${startIndex + 1} to ${endIndex} of ${totalItems} entries`;
         }
 
         const mode = document.getElementById('report-mode') ? document.getElementById('report-mode').value : 'day';
         const startTime = document.getElementById('report-start-time').value;
 
         if (mode === 'day') {
-            tbody.innerHTML = reportData.map(r => {
+            tbody.innerHTML = currentData.map(r => {
                 const statusClass = r.status === 'Late' ? 'text-red-500 font-bold' :
                     (r.status === 'On Time' ? 'text-green-500 font-bold' : 
                      (r.status === 'Off Day' ? 'text-blue-400 font-semibold' : 'text-gray-400'));
@@ -1502,7 +1553,7 @@ const app = {
                 `;
             }).join('');
         } else {
-            tbody.innerHTML = reportData.map((r, index) => {
+            tbody.innerHTML = currentData.map((r, index) => {
                 const uniqueId = `drawer-${r.user_id}-${index}`;
                 const hasAbsent = r.absentDays > 0;
                 const hasLate = r.lateDays > 0;
@@ -1640,7 +1691,27 @@ const app = {
             return matchesQuery && matchesStatus;
         });
 
-        this.renderLateReportTable(filtered);
+        this.reportsPage = 1;
+        this.currentFilteredReport = filtered;
+        this.renderLateReportTable();
+        
+        const mode = document.getElementById('report-mode') ? document.getElementById('report-mode').value : 'day';
+        this.calculateAndRenderKPIs(filtered, mode);
+    },
+
+    prevReportsPage() {
+        if (this.reportsPage > 1) {
+            this.reportsPage--;
+            this.renderLateReportTable();
+        }
+    },
+
+    nextReportsPage() {
+        const totalPages = Math.ceil((this.currentFilteredReport || []).length / this.reportsPerPage) || 1;
+        if (this.reportsPage < totalPages) {
+            this.reportsPage++;
+            this.renderLateReportTable();
+        }
     },
 
     translations: {
@@ -2077,10 +2148,11 @@ const app = {
             '#users-page .card:nth-child(2) .section-header button:nth-of-type(2)': `<i class="fas fa-fingerprint"></i> ${trans.btn_sync_bio}`,
             '#users-table th:nth-child(1)': trans.col_name,
             '#users-table th:nth-child(2)': trans.col_id,
-            '#users-table th:nth-child(3)': trans.role,
-            '#users-table th:nth-child(4)': 'Work Pattern',
-            '#users-table th:nth-child(5)': trans.col_bio_status,
-            '#users-table th:nth-child(6)': trans.col_actions,
+            '#users-table th:nth-child(3)': trans.col_device,
+            '#users-table th:nth-child(4)': trans.role,
+            '#users-table th:nth-child(5)': 'Work Pattern',
+            '#users-table th:nth-child(6)': trans.col_bio_status,
+            '#users-table th:nth-child(7)': trans.col_actions,
             
             // Schedules
             '.schedules-tabs button[data-tab="tab-define-shifts"]': `<i class="fas fa-clock" style="color: #818cf8;"></i> ${trans.tab_define_shifts}`,
