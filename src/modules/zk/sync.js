@@ -31,7 +31,7 @@ async function getZkConnection(ip, ports) {
     let lastError = null;
     for (let port of ports) {
         if (!port) continue;
-        let zk = new ZKLib(ip, parseInt(port), 10000, 7000);
+        let zk = new ZKLib(ip, parseInt(port), 10000, 4370);
         try {
             await zk.createSocket();
             return zk;

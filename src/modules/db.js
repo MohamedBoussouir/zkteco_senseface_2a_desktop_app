@@ -96,8 +96,8 @@ async function initDb() {
         });
         // Insert default shifts
         await db('shifts').insert([
-            { name: 'الوردية الصباحية (Morning Shift)', start_time: '08:00', end_time: '17:00' },
-            { name: 'الوردية المسائية (Evening Shift)', start_time: '16:00', end_time: '00:00' }
+            { name: 'Morning Shift', start_time: '08:00', end_time: '17:00' },
+            { name: 'Evening Shift', start_time: '16:00', end_time: '00:00' }
         ]);
     }
 
@@ -134,4 +134,4 @@ async function initDb() {
     }
 }
 
-module.exports = { db, initDb };
+module.exports = { db, initDb };    
