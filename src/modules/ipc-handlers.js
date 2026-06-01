@@ -7,6 +7,7 @@ const { withLock, syncUsersFromDevice, getZkConnection } = require('./zk/sync');
 const { enrollFingerprint, abortEnrollment } = require('./zk/enroll');
 const { createUser, deleteUser, deleteFinger, deleteAllFingers } = require('./zk/user');
 const { rebootDevice, syncTime, clearAdmin, beep } = require('./zk/device');
+const { queueAdmsCommand } = require('./adms-server');
 
 function setupIpcHandlers(mainWindow) {
     // Licensing
@@ -201,48 +202,60 @@ function setupIpcHandlers(mainWindow) {
     });
 
     ipcMain.handle('create-user', async (event, { ip, ports, uid, userId, name, role, work_pattern_id, user, deviceId }) => {
-        // Handle both object-style and flat-style parameters
         const userData = user || { uid, userId, name, role, work_pattern_id };
+        const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
+        if (!device) return { success: false, error: 'Device not found' };
 
-        const res = await createUser(ip, ports, userData);
-        if (res.success) {
-            const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
-            if (device) {
-                await db('users').insert({
-                    uid: userData.uid,
-                    user_id: (userData.userId || userData.uid).toString(),
-                    name: userData.name || 'Unknown',
-                    role: userData.role || 0,
-                    device_id: device.id,
-                    fingerprints: '[]',
-                    work_pattern_id: userData.work_pattern_id || null
-                }).onConflict(['user_id', 'device_id']).merge();
-            }
-        }
-        return res;
+        // ADMS fields must be separated by tabs (\t), not spaces
+        queueAdmsCommand(`DATA UPDATE userinfo PIN=${userData.userId}\tName=${userData.name}\tPri=${userData.role || 0}`);
+        
+        await db('users').insert({
+            uid: userData.uid,
+            user_id: (userData.userId || userData.uid).toString(),
+            name: userData.name || 'Unknown',
+            role: userData.role || 0,
+            device_id: device.id,
+            fingerprints: '[]',
+            work_pattern_id: userData.work_pattern_id || null
+        }).onConflict(['user_id', 'device_id']).merge();
+        
+        return { success: true };
     });
 
     ipcMain.handle('update-user', async (event, { ip, ports, uid, userId, name, role, work_pattern_id, deviceId }) => {
-        const userData = { uid, userId, name, role, work_pattern_id };
-        const res = await createUser(ip, ports, userData);
-        if (res.success) {
-            const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
-            if (device) {
-                await db('users').where({ user_id: userId.toString(), device_id: device.id }).update({
-                    name: name,
-                    role: role || 0,
-                    work_pattern_id: work_pattern_id || null
-                });
-            }
-        }
-        return res;
+        const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
+        if (!device) return { success: false, error: 'Device not found' };
+
+        queueAdmsCommand(`DATA UPDATE userinfo PIN=${userId}\tName=${name}\tPri=${role || 0}`);
+        
+        await db('users').where({ user_id: userId.toString(), device_id: device.id }).update({
+            name: name,
+            role: role || 0,
+            work_pattern_id: work_pattern_id || null
+        });
+        
+        return { success: true };
     });
 
-    ipcMain.handle('delete-user', async (event, { ip, ports, uid, userId, deviceId }) => deleteUser(ip, ports, uid, userId));
+    ipcMain.handle('delete-user', async (event, { ip, ports, uid, userId, deviceId }) => {
+        const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
+        if (!device) return { success: false, error: 'Device not found' };
+
+        // Send both variants to cover different firmware versions
+        queueAdmsCommand(`DATA DELETE user PIN=${userId}`);
+        queueAdmsCommand(`DATA DELETE userinfo PIN=${userId}`);
+        
+        await db('users').where({ uid, device_id: device.id }).delete();
+        await db('attendance').where({ user_id: userId.toString(), device_id: device.id }).delete();
+        
+        return { success: true };
+    });
+
     ipcMain.handle('delete-user-finger', async (event, { ip, ports, uid, userId, fingerIndex, deviceId }) => {
-        const fIdx = parseInt(fingerIndex);
-        console.log(`[IPC] Deleting finger ${fIdx} for User ${userId} (UID: ${uid}) on ${ip}`);
-        return deleteFinger(ip, ports, uid, userId, fIdx);
+        queueAdmsCommand(`DATA DELETE templatev10 Pin=${userId}\tFingerID=${fingerIndex}`);
+        queueAdmsCommand(`DATA DELETE BIODATA Pin=${userId}\tNo=${fingerIndex}`);
+        queueAdmsCommand(`DATA DELETE fingrtmp PIN=${userId}\tFID=${fingerIndex}`);
+        return { success: true };
     });
 
     // Fingerprints
@@ -255,185 +268,103 @@ function setupIpcHandlers(mainWindow) {
     });
 
     ipcMain.handle('sync-users-from-device', async (event, { ip, ports, deviceId }) => {
-        return await withLock(ip, ports, async (zk) => {
-            const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
-            if (!device) return { success: false, error: 'Device not found' };
+        const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
+        if (!device) return { success: false, error: 'Device not found' };
+        
+        // Reset last_sync_time for all users on this device to detect deletions
+        await db('users').where('device_id', device.id).update({ last_sync_time: 0 });
 
-            // 1. Sync users using the central helper (performs obsolete user & log cleanup)
-            let usersCount = 0;
+        // Queue commands to force the device to push all users and fingerprints via ADMS
+        queueAdmsCommand('DATA QUERY userinfo');
+        queueAdmsCommand('DATA QUERY templatev10');
+        queueAdmsCommand('DATA QUERY BIODATA');
+        
+        // Start a timeout to delete users that weren't pushed
+        setTimeout(async () => {
             try {
-                usersCount = await syncUsersFromDevice(zk, device.id);
-            } catch (err) {
-                console.error(`[Sync] Failed to fetch users from ${ip}:`, err.message);
-                return { success: false, error: 'Device busy or connection timed out' };
-            }
-
-            // 2. Sync attendance logs directly and merge them to update existing records
-            let logsCount = 0;
-            try {
-                const logs = await zk.getAttendances();
-                const lData = Array.isArray(logs) ? logs : (logs.data || []);
-                for (const log of lData) {
-                    try {
-                        const rawId = log.deviceUserId || log.userId;
-                        if (!rawId) continue;
-
-                        let ts = log.recordTime || log.timestamp;
-                        if (!ts) continue;
-
-                        const isoTs = ts instanceof Date ? ts.toISOString() : new Date(ts).toISOString();
-
-                        const user = await db('users').where({ user_id: rawId.toString(), device_id: device.id }).first();
-                        await db('attendance').insert({
-                            user_id: rawId.toString(),
-                            user_name: user ? user.name : `User ${rawId}`,
-                            timestamp: isoTs,
-                            status: log.status,
-                            device_id: device.id
-                        }).onConflict(['user_id', 'timestamp', 'device_id']).merge();
-                        logsCount++;
-                    } catch (e) { }
+                // Anyone still at 0 after 20 seconds was deleted from the device!
+                const deletedCount = await db('users')
+                    .where('device_id', device.id)
+                    .where('last_sync_time', 0)
+                    .delete();
+                if (deletedCount > 0) {
+                    console.log(`[ADMS Sync Cleanup] Auto-deleted ${deletedCount} users from local DB because they are missing from device.`);
+                    // Optionally notify frontend here if possible
                 }
-            } catch (err) {
-                console.error(`[Sync] Failed to fetch attendance logs from ${ip}:`, err.message);
-            }
+            } catch (e) { console.error('Cleanup error:', e); }
+        }, 20000); // 20 seconds should be enough for the device to push all chunks
 
-            return { success: true, count: usersCount, logsCount };
-        });
+        const res = await db('users').where('device_id', device.id).count('id as c');
+        const count = res[0].c || 0;
+        return { success: true, count: count, logsCount: 0, message: "Sync commands sent! Deleted users will vanish within 20 seconds." };
     });
 
     ipcMain.handle('sync-logs-from-device', async (event, { ip, ports, deviceId }) => {
-        return await withLock(ip, ports, async (zk) => {
-            const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
-            if (!device) return { success: false, error: 'Device not found' };
+        const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
+        if (!device) return { success: false, error: 'Device not found' };
 
-            let logsCount = 0;
-            try {
-                const logs = await zk.getAttendances();
-                const lData = Array.isArray(logs) ? logs : (logs.data || []);
-                for (const log of lData) {
-                    try {
-                        const rawId = log.deviceUserId || log.userId;
-                        if (!rawId) continue;
+        // Force device to push its attendance logs
+        queueAdmsCommand('DATA QUERY ATTLOG');
 
-                        let ts = log.recordTime || log.timestamp;
-                        if (!ts) continue;
-
-                        const isoTs = ts instanceof Date ? ts.toISOString() : new Date(ts).toISOString();
-
-                        const user = await db('users').where({ user_id: rawId.toString(), device_id: device.id }).first();
-                        await db('attendance').insert({
-                            user_id: rawId.toString(),
-                            user_name: user ? user.name : `User ${rawId}`,
-                            timestamp: isoTs,
-                            status: log.status,
-                            device_id: device.id
-                        }).onConflict(['user_id', 'timestamp', 'device_id']).merge();
-                        logsCount++;
-                    } catch (e) { }
-                }
-            } catch (err) {
-                console.error(`[Sync-Logs] Failed to fetch attendance logs from ${ip}:`, err.message);
-                return { success: false, error: err.message };
-            }
-
-            return { success: true, logsCount };
-        });
+        return { success: true, logsCount: 0, message: "Sync command sent! Logs will appear shortly via ADMS." };
     });
 
     ipcMain.handle('get-users-fingerprints', async (event, { ip, ports, users, deviceId }) => {
-        return await withLock(ip, ports, async (zk) => {
-            const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
-            if (!device) return { success: false, error: 'Device not found' };
+        const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
+        if (!device) return { success: false, error: 'Device not found' };
 
-            console.log(`[Sync-Bio] Starting FAST BULK sync for ${users.length} users...`);
-            try { await zk.disableDevice(); } catch (e) { }
-
-            let results = [];
-            const usersMap = {};
-            for (const u of users) {
-                usersMap[u.uid] = { ...u, fpCount: 0, fpIndices: [] };
-            }
-
-            try {
-                const reqData = Buffer.from([0x01, 0x07, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
-                const fpRes = await zk.zklibTcp.readWithBuffer(reqData);
-                const data = fpRes.data;
-
-                if (data && data.length >= 4) {
-                    let offset = 4;
-                    while (offset < data.length) {
-                        const entrySize = data.readUInt16LE(offset);
-                        if (entrySize === 0) break;
-
-                        const userSn = data.readUInt16LE(offset + 2);
-                        const fingerIndex = data.readUInt8(offset + 4); // <-- هذا هو السطر الذي نسيته سابقاً وتسبب في الخطأ
-                        const flag = data.readUInt8(offset + 5);
-
-                        // flag 1 = Valid, 3 = Duress
-                        if ((flag === 1 || flag === 3) && usersMap[userSn]) {
-                            usersMap[userSn].fpCount++;
-                            if (!usersMap[userSn].fpIndices.includes(fingerIndex)) {
-                                usersMap[userSn].fpIndices.push(fingerIndex);
-                            }
-                        }
-
-                        offset += entrySize;
-                    }
+        const results = [];
+        for (const u of users) {
+            const user = await db('users').where({ user_id: u.user_id, device_id: device.id }).first();
+            if (user && user.fingerprints) {
+                try {
+                    const fpData = JSON.parse(user.fingerprints);
+                    results.push({ user_id: u.user_id, count: fpData.count || 0, indices: fpData.indices || [] });
+                } catch(e) {
+                    results.push({ user_id: u.user_id, count: 0, indices: [] });
                 }
-            } catch (e) {
-                console.error('[Sync-Bio] Error during bulk fetch:', e.message);
+            } else {
+                results.push({ user_id: u.user_id, count: 0, indices: [] });
             }
-
-            for (const u of users) {
-                const finalCount = usersMap[u.uid].fpCount;
-                const indices = usersMap[u.uid].fpIndices;
-                console.log(`  -> [RESULT] User ${u.user_id}: ${finalCount} real fingerprints. Indices: ${indices.join(',')}`);
-
-                await db('users')
-                    .where({ user_id: u.user_id, device_id: device.id })
-                    .update({ fingerprints: JSON.stringify({ count: finalCount, indices }) });
-
-                results.push({ user_id: u.user_id, count: finalCount, indices });
-            }
-
-            try { await zk.enableDevice(); } catch (e) { }
-            return { success: true, results };
-        });
+        }
+        return { success: true, results };
     });
 
     ipcMain.handle('delete-user-fingerprint', async (event, { ip, ports, uid, userId, fingerIndex, deviceId }) => {
-        const res = await deleteFinger(ip, ports, uid, userId, fingerIndex);
-        if (res.success) {
-            const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
-            if (device) {
-                const user = await db('users').where({ user_id: userId, device_id: device.id }).first();
-                if (user && user.fingerprints) {
-                    try {
-                        const fpData = JSON.parse(user.fingerprints);
-                        if (fpData && Array.isArray(fpData.indices)) {
-                            fpData.indices = fpData.indices.filter(i => i.toString() !== fingerIndex.toString());
-                            fpData.count = fpData.indices.length;
-                            await db('users').where('id', user.id).update({ fingerprints: JSON.stringify(fpData) });
-                        }
-                    } catch (e) { }
+        const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
+        if (!device) return { success: false, error: 'Device not found' };
+
+        queueAdmsCommand(`DATA DELETE templatev10 Pin=${userId}\tFingerID=${fingerIndex}`);
+        queueAdmsCommand(`DATA DELETE BIODATA Pin=${userId}\tNo=${fingerIndex}`);
+        queueAdmsCommand(`DATA DELETE fingrtmp PIN=${userId}\tFID=${fingerIndex}`);
+
+        const user = await db('users').where({ user_id: userId, device_id: device.id }).first();
+        if (user && user.fingerprints) {
+            try {
+                const fpData = JSON.parse(user.fingerprints);
+                if (fpData && Array.isArray(fpData.indices)) {
+                    fpData.indices = fpData.indices.filter(i => i.toString() !== fingerIndex.toString());
+                    fpData.count = fpData.indices.length;
+                    await db('users').where('id', user.id).update({ fingerprints: JSON.stringify(fpData) });
                 }
-            }
+            } catch (e) { }
         }
-        return res;
+        return { success: true };
     });
 
     ipcMain.handle('delete-all-fingerprints', async (event, { ip, ports, uid, userId, deviceId }) => {
-        const res = await deleteAllFingers(ip, ports, uid, userId);
-        if (res.success) {
-            const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
-            if (device) {
-                await db('users')
-                    .where({ user_id: userId, device_id: device.id })
-                    .update({ fingerprints: JSON.stringify({ count: 0, indices: [] }) });
-            }
-        }
-        return res;
+        const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
+        if (!device) return { success: false, error: 'Device not found' };
+
+        queueAdmsCommand(`DATA DELETE templatev10 Pin=${userId}`);
+        queueAdmsCommand(`DATA DELETE BIODATA Pin=${userId}`);
+        queueAdmsCommand(`DATA DELETE fingrtmp PIN=${userId}`);
+
+        await db('users')
+            .where({ user_id: userId, device_id: device.id })
+            .update({ fingerprints: JSON.stringify({ count: 0, indices: [] }) });
+        
+        return { success: true };
     });
 
     // Logs

@@ -41,6 +41,13 @@ async function initDb() {
                 table.integer('work_pattern_id').unsigned().references('id').inTable('work_patterns').onDelete('SET NULL');
             });
         }
+        // Self-healing: ensure last_sync_time column exists
+        const hasLastSyncTime = await db.schema.hasColumn('users', 'last_sync_time');
+        if (!hasLastSyncTime) {
+            await db.schema.alterTable('users', (table) => {
+                table.bigInteger('last_sync_time').defaultTo(0);
+            });
+        }
     }
 
     // Clean up user_devices from previous experimental many-to-many setup

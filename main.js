@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const { initDb } = require('./src/modules/db');
 const { setupIpcHandlers } = require('./src/modules/ipc-handlers');
-const { startBackgroundSync } = require('./src/modules/scheduler');
+const { startAdmsServer } = require('./src/modules/adms-server');
 const licensing = require('./src/modules/licensing');
 
 ipcMain.on('log', (event, msg) => {
@@ -47,7 +47,7 @@ async function createWindow() {
     setupIpcHandlers(mainWindow);
 
     // Start Background Tasks
-    startBackgroundSync(mainWindow);
+    startAdmsServer(80, mainWindow);
 }
 
 // Security: License Check IPC
