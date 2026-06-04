@@ -37,6 +37,7 @@ const app = {
 
         this.loadSavedLanguage();
         await this.loadDefaultShiftSettings();
+        await this.loadAdmsPort();
         this.bindEvents();
         await this.loadDevices();
         await this.loadShifts(); // pre-load shifts
@@ -213,7 +214,7 @@ const app = {
         selects.forEach(id => {
             const el = document.getElementById(id);
             if (el) {
-                el.innerHTML = this.devices.map(d => `<option value="${d.id}">${d.name} (${d.ip})</option>`).join('');
+                el.innerHTML = this.devices.map(d => `<option value="${d.id}">${d.name} (${d.sn || d.ip})</option>`).join('');
             }
         });
     },
@@ -226,13 +227,13 @@ const app = {
                 <div class="flex justify-between items-start mb-4">
                     <div class="device-info">
                         <h3 class="font-bold text-lg">${d.name}</h3>
-                        <p class="text-slate-400 text-sm">${d.ip}:${d.port1}</p>
+                        <p class="text-slate-400 text-sm">SN: ${d.sn || 'Unknown'} <span style="font-size:0.75rem; opacity:0.6;">(${d.ip})</span></p>
                     </div>
                     <span class="status-badge warning" id="status-${d.id}">Checking...</span>
                 </div>
                 <div class="flex gap-2">
-                    <button class="btn btn-primary btn-sm flex-1" onclick="app.testConn('${d.ip}', [${d.port1}, ${d.port2}])">
-                        <i class="fas fa-plug"></i> Test
+                    <button class="btn btn-primary btn-sm flex-1" onclick="app.testConn('${d.sn}', '${d.ip}')">
+                        <i class="fas fa-plug"></i> Check Status
                     </button>
                     <button class="btn btn-outline btn-sm" onclick="app.deleteDevice(${d.id})">
                         <i class="fas fa-trash"></i>
@@ -279,8 +280,9 @@ const app = {
         if (pageId === 'logs') this.loadLogs();
         if (pageId === 'dashboard') this.loadDashboardStats();
         if (pageId === 'settings') {
-            this.loadStrategyMode();
-            this.loadDefaultShiftSettings();
+           this.loadStrategyMode();
+           this.loadDefaultShiftSettings();
+           this.loadAdmsPort();
         }
         if (pageId === 'reports') {
             this.loadDefaultShiftSettings();
@@ -843,20 +845,22 @@ const app = {
 
     async addDevice() {
         const name = document.getElementById('device-name').value;
-        const ip = document.getElementById('device-ip').value;
-        const port1 = parseInt(document.getElementById('device-port1').value) || 4370;
-        const port2 = parseInt(document.getElementById('device-port2').value) || 4371;
+        const sn = document.getElementById('device-sn').value;
+        const ip = document.getElementById('device-ip').value || '0.0.0.0';
+        const port1 = parseInt(document.getElementById('device-port1').value) || 8088;
+        const port2 = parseInt(document.getElementById('device-port2').value) || 8088;
 
-        if (!name || !ip) {
-            this.showNotification('Please enter name and IP', 'error');
+        if (!name || !sn) {
+            this.showNotification('Please enter name and Serial Number (SN)', 'error');
             return;
         }
 
-        const res = await window.electronAPI.invoke('add-device', { name, ip, port1, port2 });
+        const res = await window.electronAPI.invoke('add-device', { name, sn, ip, port1, port2 });
         if (res.success) {
-            this.showNotification('Device added successfully!');
+            this.showNotification('Device added successfully! Please wait for it to ping the server.');
             this.loadDevices();
             document.getElementById('device-name').value = '';
+            document.getElementById('device-sn').value = '';
             document.getElementById('device-ip').value = '';
         } else {
             this.showNotification('Failed: ' + res.error, 'error');
@@ -1018,17 +1022,17 @@ const app = {
         setTimeout(() => toast?.remove(), 4000);
     },
 
-    async testConn(ip, ports) {
-        this.showNotification('Testing connection...', 'info');
-        const res = await window.electronAPI.invoke('test-device-connection', { ip, ports });
-        if (res.success) this.showNotification('Connection Successful!');
-        else this.showNotification('Connection Failed', 'error');
+    async testConn(sn, ip) {
+        this.showNotification('Checking device status...', 'info');
+        const res = await window.electronAPI.invoke('test-device-connection', { sn, ip });
+        if (res.success) this.showNotification('Device is Online!');
+        else this.showNotification(res.error || 'Device is Offline', 'error');
     },
 
     startStatusPolling() {
         setInterval(async () => {
             for (const d of this.devices) {
-                const res = await window.electronAPI.invoke('test-device-connection', { ip: d.ip, ports: [d.port1, d.port2] });
+                const res = await window.electronAPI.invoke('test-device-connection', { sn: d.sn, ip: d.ip });
                 const el = document.getElementById(`status-${d.id}`);
                 if (el) {
                     el.className = `status-badge ${res.success ? 'online' : 'offline'}`;
@@ -1181,6 +1185,46 @@ const app = {
         } catch (err) {
             this.showNotification('Connection error: ' + err.message, 'error');
             if (statusEl) statusEl.innerHTML = '<span style="color: #f87171"><i class="fas fa-exclamation-triangle mr-1"></i> Connection failed</span>';
+        }
+    },
+
+    async loadAdmsPort() {
+        try {
+            const res = await window.electronAPI.invoke('get-adms-port');
+            if (res.success) {
+                const portInput = document.getElementById('setting-adms-port');
+                if (portInput) portInput.value = res.port;
+            }
+        } catch (err) {
+            console.error('Failed to load ADMS port:', err);
+        }
+    },
+
+    async applyAdmsPort() {
+        const portInput = document.getElementById('setting-adms-port');
+        if (!portInput || !portInput.value) return;
+
+        const port = parseInt(portInput.value);
+        if (port < 1 || port > 65535) {
+            this.showNotification('Invalid port number.', 'error');
+            return;
+        }
+
+        const statusEl = document.getElementById('adms-port-status');
+        if (statusEl) statusEl.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Saving port...';
+
+        try {
+            const res = await window.electronAPI.invoke('set-adms-port', port);
+            if (res.success) {
+                this.showNotification(res.message || 'Port updated successfully.', 'success');
+                if (statusEl) statusEl.innerHTML = `<span style="color: #4ade80"><i class="fas fa-check mr-1"></i> ${res.message}</span>`;
+            } else {
+                this.showNotification('Failed to update port/firewall: ' + res.error, 'error');
+                if (statusEl) statusEl.innerHTML = `<span style="color: #f87171"><i class="fas fa-exclamation-triangle mr-1"></i> ${res.error}</span>`;
+            }
+        } catch (err) {
+            this.showNotification('Connection error: ' + err.message, 'error');
+            if (statusEl) statusEl.innerHTML = `<span style="color: #f87171"><i class="fas fa-exclamation-triangle mr-1"></i> Connection failed</span>`;
         }
     },
 

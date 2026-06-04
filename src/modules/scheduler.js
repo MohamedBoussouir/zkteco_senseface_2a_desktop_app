@@ -1,5 +1,5 @@
 const { db } = require('./db');
-const { withLock, syncUsersFromDevice } = require('./zk/sync');
+const { queueAdmsCommand } = require('./adms-server');
 
 let isSyncing = false;
 let loopStarted = false;
@@ -11,50 +11,19 @@ async function startBackgroundSync(mainWindow) {
         console.log('[Scheduler] Executing sync cycle...');
 
         try {
-            const devices = await db('devices').select('*');
-            for (const device of devices) {
-                try {
-                    await withLock(device.ip, [device.port1, device.port2], async (zk) => {
-                        console.log(`[Sync] Smart Quick-Sync started for ${device.ip}...`);
-                        try {
-                            await syncUsersFromDevice(zk, device.id);
-                        } catch (e) {
-                            console.error(`[Sync] Skipping users fetch for ${device.ip} due to timeout:`, e.message);
-                        }
-                        const logs = await zk.getAttendances();
-                        const lData = Array.isArray(logs) ? logs : (logs.data || []);
-                        for (const log of lData) {
-                            try {
-                                const rawId = log.deviceUserId || log.userId;
-                                if (!rawId) continue;
-
-                                let ts = log.recordTime || log.timestamp;
-                                if (!ts) continue;
-                                
-                                // Ensure standard ISO format for DB storage
-                                const isoTs = ts instanceof Date ? ts.toISOString() : new Date(ts).toISOString();
-
-                                const user = await db('users').where({ user_id: rawId.toString(), device_id: device.id }).first();
-                                await db('attendance').insert({
-                                    user_id: rawId.toString(),
-                                    user_name: user ? user.name : `User ${rawId}`,
-                                    timestamp: isoTs,
-                                    status: log.status,
-                                    device_id: device.id
-                                }).onConflict(['user_id', 'timestamp', 'device_id']).merge();
-                            } catch (e) { }
-                        }
-                    });
-                } catch (e) {
-                    console.error(`[Scheduler] Failed to sync device ${device.ip}:`, e.message || e);
-                }
-            }
+            // In ADMS, devices push data automatically.
+            // But we can force a sync by queuing a global DATA QUERY command.
+            queueAdmsCommand('DATA QUERY ATTLOG');
+            queueAdmsCommand('DATA QUERY userinfo');
+            queueAdmsCommand('DATA QUERY BIODATA');
+            
             if (mainWindow) mainWindow.webContents.send('background-sync-complete');
         } catch (e) {
             console.error('[Scheduler] Sync error:', e.message || e);
         } finally {
             isSyncing = false;
         }
+        // Force full pull every 30 minutes just in case
         setTimeout(runSync, 30 * 60 * 1000); 
     };
 

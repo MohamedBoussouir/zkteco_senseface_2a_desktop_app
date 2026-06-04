@@ -73,10 +73,27 @@ async function initDb() {
         await db.schema.createTable('devices', (table) => {
             table.increments('id');
             table.string('name');
-            table.string('ip');
+            table.string('sn').unique(); // Serial Number for ADMS
+            table.string('ip'); // Kept for legacy/local network use
             table.integer('port1');
             table.integer('port2');
+            table.bigInteger('last_seen').defaultTo(0);
         });
+    } else {
+        // Self-healing: ensure sn column exists
+        const hasSn = await db.schema.hasColumn('devices', 'sn');
+        if (!hasSn) {
+            await db.schema.alterTable('devices', (table) => {
+                table.string('sn').unique();
+            });
+        }
+        // Self-healing: ensure last_seen column exists
+        const hasLastSeen = await db.schema.hasColumn('devices', 'last_seen');
+        if (!hasLastSeen) {
+            await db.schema.alterTable('devices', (table) => {
+                table.bigInteger('last_seen').defaultTo(0);
+            });
+        }
     }
 
     // Settings Table
@@ -90,6 +107,7 @@ async function initDb() {
     }
     await db('settings').insert({ key: 'default_start_time', value: '08:00' }).onConflict('key').ignore();
     await db('settings').insert({ key: 'default_end_time', value: '17:00' }).onConflict('key').ignore();
+    await db('settings').insert({ key: 'adms_port', value: '80' }).onConflict('key').ignore();
 
 
     // Shifts Table

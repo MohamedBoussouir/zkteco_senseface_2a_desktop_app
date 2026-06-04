@@ -529,21 +529,17 @@
                         <input type="text" id="device-name" placeholder="Front Entrance">
                     </div>
                     <div class="form-group">
-                        <label>IP Address</label>
-                        <input type="text" id="device-ip" placeholder="192.168.0.157">
+                        <label>Serial Number (SN) <span style="color:var(--text-muted); font-size:0.8rem;">*Required for ADMS</span></label>
+                        <input type="text" id="device-sn" placeholder="e.g. CFEZ21326... ">
                     </div>
-                    <div class="playground-controls">
-                        <div class="form-group">
-                            <label>Port 1</label>
-                            <input type="number" id="device-port1" value="4370">
-                        </div>
-                        <div class="form-group">
-                            <label>Port 2</label>
-                            <input type="number" id="device-port2" value="4371">
-                        </div>
+                    <div class="form-group">
+                        <label>Local IP Address <span style="color:var(--text-muted); font-size:0.8rem;">(Optional)</span></label>
+                        <input type="text" id="device-ip" placeholder="192.168.1.200">
+                        <input type="hidden" id="device-port1" value="8088">
+                        <input type="hidden" id="device-port2" value="8088">
                     </div>
                     <div style="display:flex; gap:10px; margin-top:20px">
-                        <button class="btn btn-secondary" onclick="app.testConn(document.getElementById('device-ip').value, [4370, 4371])">Test Ping</button>
+                        <button class="btn btn-secondary" onclick="app.testConn(document.getElementById('device-sn').value, document.getElementById('device-ip').value)">Check Status</button>
                         <button class="btn btn-primary flex-1" onclick="app.addDevice()">Save Device</button>
                     </div>
                 </div>
@@ -682,6 +678,21 @@
             <div class="settings-grid">
                 <!-- Left Column -->
                 <div class="settings-col">
+                    <div class="card">
+                        <div class="section-header">
+                            <h2><i class="fas fa-network-wired"></i> ADMS Network Settings</h2>
+                        </div>
+                        <p class="text-slate-400 mb-3" style="font-size: 0.85rem;">Set the port the application uses to listen for device connections. Note: You must update Windows Firewall manually if you change this.</p>
+                        <div class="form-group mb-2">
+                            <label style="font-size: 0.85rem;">Server Port (Default: 80)</label>
+                            <input type="number" id="setting-adms-port" style="background: var(--bg-slate-900); color: var(--text-main); border: 1px solid var(--border-color); padding: 8px; border-radius: 8px; width: 100%; margin-bottom: 8px; outline: none; font-size: 0.9rem;">
+                        </div>
+                        <button class="btn btn-primary btn-full mb-2" onclick="app.applyAdmsPort()">
+                            <i class="fas fa-save"></i> Apply Port
+                        </button>
+                        <div id="adms-port-status" class="mt-2 text-sm" style="text-align: center;"></div>
+                    </div>
+
                     <div class="card">
                         <div class="section-header">
                             <h2><i class="fas fa-clock"></i> Device Time Settings</h2>

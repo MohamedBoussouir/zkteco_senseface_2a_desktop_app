@@ -1,6 +1,6 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
-const { initDb } = require('./src/modules/db');
+const { initDb, db } = require('./src/modules/db');
 const { setupIpcHandlers } = require('./src/modules/ipc-handlers');
 const { startAdmsServer } = require('./src/modules/adms-server');
 const licensing = require('./src/modules/licensing');
@@ -47,7 +47,12 @@ async function createWindow() {
     setupIpcHandlers(mainWindow);
 
     // Start Background Tasks
-    startAdmsServer(80, mainWindow);
+    let admsPort = 80;
+    try {
+        const p = await db('settings').where('key', 'adms_port').first();
+        if (p && p.value) admsPort = parseInt(p.value);
+    } catch(e) {}
+    startAdmsServer(admsPort, mainWindow);
 }
 
 // Security: License Check IPC

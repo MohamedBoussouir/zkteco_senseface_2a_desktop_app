@@ -26,6 +26,7 @@ function startAdmsServer(port = 80, mainWindow = null) {
         if (pathname === '/iclock/cdata') {
             if (req.method === 'GET') {
                 console.log(`[ADMS] Handshake from SN: ${query.SN}`);
+                if (query.SN) await db('devices').where('sn', query.SN).update({ last_seen: Date.now() });
                 res.writeHead(200, { 'Content-Type': 'text/plain' });
                 res.end('OK');
             } else if (req.method === 'POST') {
@@ -46,6 +47,7 @@ function startAdmsServer(port = 80, mainWindow = null) {
                 });
             }
         } else if (pathname === '/iclock/getrequest') {
+            if (query.SN) await db('devices').where('sn', query.SN).update({ last_seen: Date.now() });
             if (pendingCommands.length > 0) {
                 const cmdString = pendingCommands.map(cmd => {
                     cmdIdCounter++;
@@ -60,6 +62,7 @@ function startAdmsServer(port = 80, mainWindow = null) {
                 res.end('OK');
             }
         } else if (pathname === '/iclock/devicecmd') {
+            if (query.SN) await db('devices').where('sn', query.SN).update({ last_seen: Date.now() });
             let body = '';
             req.on('data', chunk => body += chunk.toString());
             req.on('end', () => {
@@ -105,7 +108,7 @@ async function processAdmsData(table, data, sn, mainWindow) {
 
     let device = null;
     try {
-        device = await db('devices').where('ip', sn).orWhere('name', 'like', `%${sn}%`).first();
+        device = await db('devices').where('sn', sn).orWhere('ip', sn).first();
         if (!device) {
             device = await db('devices').first(); // Fallback
         }
@@ -116,8 +119,8 @@ async function processAdmsData(table, data, sn, mainWindow) {
     if (!device) {
         console.log(`[ADMS] Auto-creating device entry for SN: ${sn}...`);
         try {
-            await db('devices').insert({ name: `SenseFace-${sn}`, ip: sn, port1: 8088, port2: 8088 });
-            device = await db('devices').where('ip', sn).first();
+            await db('devices').insert({ name: `SenseFace-${sn}`, sn: sn, ip: '0.0.0.0', port1: 8088, port2: 8088, last_seen: Date.now() });
+            device = await db('devices').where('sn', sn).first();
         } catch(e) {}
     }
 
@@ -211,6 +214,9 @@ async function processAdmsData(table, data, sn, mainWindow) {
                         let fpData = { count: 0, indices: [] };
                         try { fpData = JSON.parse(u.fingerprints || '{"count":0, "indices":[]}'); } catch(e){}
                         
+                        if (!fpData.indices.includes(fingerId)) {
+                            fpData.indices.push(fingerId);
+                            fpData.count = fpData.indices.length;
                             await db('users').where('id', u.id).update({
                                 fingerprints: JSON.stringify(fpData),
                                 last_sync_time: Date.now()

@@ -14,7 +14,6 @@
     "javascript-obfuscator": "^5.4.2",
     "knex": "^3.2.10",
     "node-machine-id": "^1.1.12",
-    "node-zklib": "^1.3.0",
     "sqlite3": "^6.0.1"
   },
   "devDependencies": {
@@ -26,6 +25,9 @@
     "productName": "HS ZK Attendance System",
     "win": {
       "target": "nsis"
+    },
+    "nsis": {
+      "include": "installer.nsh"
     },
     "directories": {
       "output": "dist"
