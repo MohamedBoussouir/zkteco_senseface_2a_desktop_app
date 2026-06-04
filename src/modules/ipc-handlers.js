@@ -251,9 +251,11 @@ function setupIpcHandlers(mainWindow) {
 
     // Fingerprints
     ipcMain.handle('enroll-fingerprint', async (event, { ip, ports, uid, userId, fingerIndex, deviceId }) => {
-        // Enrolling fingerprint requires the device to be in a specific mode, which is tricky over ADMS.
-        // We can just return a message indicating it's not supported via remote ADMS in this version.
-        return { success: false, error: 'Remote enrollment is not supported via ADMS. Please enroll on the device directly.' };
+        const { queueAdmsCommand } = require('./adms-server');
+        // ENROLL_FP PIN=userId FID=fingerIndex RETRY=3 OVERWRITE=1
+        // Usually, FID is 0-9. ZKTeco ADMS expects PIN.
+        queueAdmsCommand(`ENROLL_FP PIN=${userId} FID=${fingerIndex} RETRY=3 OVERWRITE=1`);
+        return { success: true, message: 'Enrollment command queued. Please check the device screen in a few seconds.' };
     });
     ipcMain.handle('abort-enrollment', async (event, { ip }) => {
         return { success: true };
