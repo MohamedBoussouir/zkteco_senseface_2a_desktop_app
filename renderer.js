@@ -104,6 +104,16 @@ const app = {
             };
         });
 
+        // Listen for ADMS background data sync events
+        window.electronAPI.on('sync-progress', (msg) => {
+            this.showNotification(msg, 'success');
+            // If the user is currently looking at the users page, refresh it to show the new data instantly
+            const usersPage = document.getElementById('users-page');
+            if (usersPage && usersPage.classList.contains('active')) {
+                this.loadUsers();
+            }
+        });
+
         // Schedules Tab Switching
         document.querySelectorAll('.schedule-tab-btn').forEach(btn => {
             btn.onclick = (e) => {

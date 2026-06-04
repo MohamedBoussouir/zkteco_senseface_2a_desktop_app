@@ -252,10 +252,9 @@ function setupIpcHandlers(mainWindow) {
     // Fingerprints
     ipcMain.handle('enroll-fingerprint', async (event, { ip, ports, uid, userId, fingerIndex, deviceId }) => {
         const { queueAdmsCommand } = require('./adms-server');
-        // ENROLL_FP PIN=userId FID=fingerIndex RETRY=3 OVERWRITE=1
-        // Usually, FID is 0-9. ZKTeco ADMS expects PIN.
-        queueAdmsCommand(`ENROLL_FP PIN=${userId} FID=${fingerIndex} RETRY=3 OVERWRITE=1`);
-        return { success: true, message: 'Enrollment command queued. Please check the device screen in a few seconds.' };
+        // We use \t (Tab) to separate parameters so modern ZKTeco firmware parses them correctly instead of merging into PIN
+        queueAdmsCommand(`ENROLL_FP PIN=${userId}\tFID=${fingerIndex}\tRETRY=3\tOVERWRITE=1`);
+        return { success: true, message: 'Enrollment command queued. Please wait for the device to pick it up.' };
     });
     ipcMain.handle('abort-enrollment', async (event, { ip }) => {
         return { success: true };
