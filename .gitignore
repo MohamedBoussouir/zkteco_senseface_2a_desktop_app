@@ -140,6 +140,7 @@ database.sqlite
 # Electron Builder Output
 dist/
 dist-zip/
+test/
 build/
 !build/icons/
 !build/installer.nsh

@@ -222,6 +222,7 @@
                         <thead>
                             <tr>
                                 <th>Name</th>
+                                <th>Photo</th>
                                 <th>ID</th>
                                 <th>Device</th>
                                 <th>Role</th>
@@ -539,7 +540,7 @@
                         <input type="hidden" id="device-port2" value="8088">
                     </div>
                     <div style="display:flex; gap:10px; margin-top:20px">
-                        <button class="btn btn-secondary" onclick="app.testConn(document.getElementById('device-sn').value, document.getElementById('device-ip').value)">Check Status</button>
+                        <button class="btn btn-secondary flex-1" onclick="app.scanDevices()" id="scan-devices-btn"><i class="fas fa-search"></i> Auto Discover</button>
                         <button class="btn btn-primary flex-1" onclick="app.addDevice()">Save Device</button>
                     </div>
                 </div>
@@ -894,6 +895,7 @@
                 </div>
             </div>
 
+
             <div class="form-group mb-6" style="text-align: left; margin-bottom: 25px;">
                 <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 8px;">Paste Activation Key</label>
                 <textarea id="activation-key" placeholder="Enter your license activation key here..." rows="3" style="width: 100%; font-family: monospace; background: rgba(0, 0, 0, 0.3); color: var(--text-main); font-size: 0.85rem; border: 1px solid var(--border-color); padding: 12px; border-radius: 12px; outline: none; resize: none;"></textarea>
@@ -906,5 +908,49 @@
     </div>
 
     <script src="renderer.js"></script>
+
+    <!-- WebCam Photo Modal -->
+    <div id="webcam-modal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h3>Take Face Photo</h3>
+                <button class="btn btn-icon" onclick="app.closeWebcamModal()"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body" style="text-align: center;">
+                <p class="text-sm text-slate-400 mb-3">Look directly at the camera. Ensure good lighting.</p>
+                <div style="position: relative; width: 100%; max-width: 400px; margin: 0 auto; background: #000; border-radius: 8px; overflow: hidden; aspect-ratio: 4/3;">
+                    <video id="webcam-video" autoplay playsinline style="width: 100%; height: 100%; object-fit: cover;"></video>
+                    <canvas id="webcam-canvas" style="display: none;"></canvas>
+                    <img id="webcam-preview" style="display: none; width: 100%; height: 100%; object-fit: cover;" />
+                </div>
+                <div id="webcam-status" class="mt-2 text-sm text-slate-300"></div>
+            </div>
+            <div class="modal-footer" style="justify-content: center; gap: 10px; flex-wrap: wrap;">
+                <input type="file" id="local-photo-input" accept="image/*" style="display: none;" onchange="app.handleLocalPhotoSelection(event)">
+                <button id="btn-local-photo" class="btn btn-secondary" onclick="document.getElementById('local-photo-input').click()">
+                    <i class="fas fa-folder-open"></i> Choose from PC
+                </button>
+                <button id="btn-webcam-capture" class="btn btn-primary" onclick="app.captureWebcamPhoto()">
+                    <i class="fas fa-camera"></i> Capture
+                </button>
+                <button id="btn-webcam-retake" class="btn btn-outline" style="display: none;" onclick="app.retakeWebcamPhoto()">
+                    <i class="fas fa-redo"></i> Retake
+                </button>
+                <button id="btn-webcam-upload" class="btn btn-success" style="display: none;" onclick="app.uploadWebcamPhoto()">
+                    <i class="fas fa-cloud-upload-alt"></i> Upload to Device
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Photo Preview Modal -->
+    <div id="photo-preview-modal" class="modal" style="z-index: 10000; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.85);" onclick="this.classList.remove('active'); this.style.display='none';">
+        <div class="modal-content" style="background: transparent; border: none; box-shadow: none; max-width: 500px; text-align: center; position: relative;">
+            <button class="btn btn-icon" style="position: absolute; top: -40px; right: 0; background: rgba(255,255,255,0.2); color: white;" onclick="document.getElementById('photo-preview-modal').classList.remove('active'); document.getElementById('photo-preview-modal').style.display='none';">
+                <i class="fas fa-times"></i>
+            </button>
+            <img id="photo-preview-img" src="" style="max-width: 100%; max-height: 80vh; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); object-fit: contain;">
+        </div>
+    </div>
 </body>
 </html>

@@ -24,6 +24,7 @@ async function initDb() {
             table.integer('device_id');
             table.text('fingerprints'); // JSON array
             table.integer('work_pattern_id').unsigned().references('id').inTable('work_patterns').onDelete('SET NULL');
+            table.text('photo'); // Base64 image
             table.unique(['user_id', 'device_id']);
         });
     } else {
@@ -46,6 +47,13 @@ async function initDb() {
         if (!hasLastSyncTime) {
             await db.schema.alterTable('users', (table) => {
                 table.bigInteger('last_sync_time').defaultTo(0);
+            });
+        }
+        // Self-healing: ensure photo column exists
+        const hasPhoto = await db.schema.hasColumn('users', 'photo');
+        if (!hasPhoto) {
+            await db.schema.alterTable('users', (table) => {
+                table.text('photo');
             });
         }
     }

@@ -104,7 +104,7 @@ if (startIndex !== -1 && endIndex !== -1) {
 
                     return \`
                                 <div class="inline-flex items-center bg-slate-800/40 rounded-xl p-1 border border-slate-700/50 shadow-inner whitespace-nowrap gap-1">
-                                    \${(fpData && Array.isArray(fpData.indices) ? fpData.indices : []).map(f => \`
+                                    \${(fpData && Array.isArray(fpData.indices) ? fpData.indices : (Array.isArray(fpData) ? fpData : [])).map(f => \`
                                         <button class="finger-count-badge cursor-pointer hover:scale-110 transition-transform bg-transparent border-none p-0 flex items-center outline-none" 
                                             onclick="app.deleteFingerDirectFlow(\${u.uid}, '\${u.user_id}', \${f}, '\${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices)))}')" 
                                             title="Delete Finger \${f}">

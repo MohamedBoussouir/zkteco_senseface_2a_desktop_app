@@ -38,6 +38,17 @@ function setupIpcHandlers(mainWindow) {
         return { success: true };
     });
 
+    ipcMain.handle('scan-devices', async (event, durationMs = 10000) => {
+        const { getDiscoveredDevices, clearDiscoveredDevices } = require('./adms-server');
+        clearDiscoveredDevices();
+        return new Promise(resolve => {
+            setTimeout(() => {
+                const devices = getDiscoveredDevices();
+                resolve({ success: true, devices });
+            }, durationMs);
+        });
+    });
+
     // Device Actions
     ipcMain.handle('reboot-device', async (event, { ip, ports, deviceId, sn }) => {
         queueAdmsCommand('REBOOT');
@@ -67,6 +78,7 @@ function setupIpcHandlers(mainWindow) {
                 db.raw('MAX(users.uid) as uid'),
                 db.raw('MAX(users.name) as name'),
                 db.raw('MAX(users.role) as role'),
+                db.raw('MAX(users.photo) as photo'),
                 db.raw('MAX(users.work_pattern_id) as work_pattern_id'),
                 db.raw('MAX(work_patterns.name) as pattern_name'),
                 db.raw("GROUP_CONCAT(users.fingerprints, '|||') as all_fingerprints"),
@@ -85,6 +97,8 @@ function setupIpcHandlers(mainWindow) {
                         const fp = JSON.parse(fpStr);
                         if (fp && Array.isArray(fp.indices)) {
                             fp.indices.forEach(idx => mergedIndices.add(idx));
+                        } else if (Array.isArray(fp)) {
+                            fp.forEach(idx => mergedIndices.add(idx));
                         }
                     } catch (e) {}
                 });
@@ -206,7 +220,7 @@ function setupIpcHandlers(mainWindow) {
             name: userData.name || 'Unknown',
             role: userData.role || 0,
             device_id: device.id,
-            fingerprints: '[]',
+            fingerprints: '{"count": 0, "indices": []}',
             work_pattern_id: userData.work_pattern_id || null
         }).onConflict(['user_id', 'device_id']).merge();
         
@@ -260,6 +274,38 @@ function setupIpcHandlers(mainWindow) {
         return { success: true };
     });
 
+    ipcMain.handle('delete-user-face', async (event, { ip, ports, uid, userId, deviceId }) => {
+        const { queueAdmsCommand } = require('./adms-server');
+        const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
+        if (!device) return { success: false, error: 'Device not found' };
+
+        // Send ADMS commands to delete the face
+        queueAdmsCommand(`DATA DELETE BIOPHOTO PIN=${userId}`);
+        queueAdmsCommand(`DATA DELETE BIODATA Pin=${userId}\tType=9`);
+
+        // Remove the photo from the database
+        await db('users').where({ user_id: userId, device_id: device.id }).update({ photo: null });
+
+        return { success: true };
+    });
+
+    ipcMain.handle('upload-face-photo', async (event, { ip, deviceId, userId, photoBase64 }) => {
+        const { queueAdmsCommand } = require('./adms-server');
+        const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
+        if (device && device.sn) {
+            // Calculate raw binary size from base64 string
+            const binarySize = Buffer.from(photoBase64, 'base64').length;
+            // Type 9 is Face in BIOPHOTO
+            queueAdmsCommand(`DATA UPDATE BIOPHOTO PIN=${userId}\tType=9\tSize=${binarySize}\tContent=${photoBase64}`);
+            
+            // Save photo to local database
+            await db('users').where('user_id', userId).update({ photo: photoBase64 });
+            
+            return { success: true };
+        }
+        return { success: false, error: 'Device SN not found' };
+    });
+
     ipcMain.handle('sync-users-from-device', async (event, { ip, ports, deviceId }) => {
         const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
         if (!device) return { success: false, error: 'Device not found' };
@@ -271,6 +317,7 @@ function setupIpcHandlers(mainWindow) {
         queueAdmsCommand('DATA QUERY userinfo');
         queueAdmsCommand('DATA QUERY templatev10');
         queueAdmsCommand('DATA QUERY BIODATA');
+        queueAdmsCommand('DATA QUERY BIOPHOTO');
         
         // Start a timeout to delete users that weren't pushed
         setTimeout(async () => {
@@ -312,7 +359,11 @@ function setupIpcHandlers(mainWindow) {
             if (user && user.fingerprints) {
                 try {
                     const fpData = JSON.parse(user.fingerprints);
-                    results.push({ user_id: u.user_id, count: fpData.count || 0, indices: fpData.indices || [] });
+                    if (Array.isArray(fpData)) {
+                        results.push({ user_id: u.user_id, count: fpData.length, indices: fpData });
+                    } else {
+                        results.push({ user_id: u.user_id, count: fpData.count || 0, indices: fpData.indices || [] });
+                    }
                 } catch(e) {
                     results.push({ user_id: u.user_id, count: 0, indices: [] });
                 }
@@ -334,7 +385,10 @@ function setupIpcHandlers(mainWindow) {
         const user = await db('users').where({ user_id: userId, device_id: device.id }).first();
         if (user && user.fingerprints) {
             try {
-                const fpData = JSON.parse(user.fingerprints);
+                let fpData = JSON.parse(user.fingerprints);
+                if (Array.isArray(fpData)) {
+                    fpData = { count: fpData.length, indices: fpData };
+                }
                 if (fpData && Array.isArray(fpData.indices)) {
                     fpData.indices = fpData.indices.filter(i => i.toString() !== fingerIndex.toString());
                     fpData.count = fpData.indices.length;

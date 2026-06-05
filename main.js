@@ -26,6 +26,7 @@ async function createWindow() {
     });
 
     mainWindow.loadFile('index.html');
+    mainWindow.webContents.openDevTools();
     
     // Security: Block DevTools shortcuts in production
     const isDev = process.env.NODE_ENV === 'development';

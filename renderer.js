@@ -478,6 +478,16 @@ const app = {
             return `
                 <tr class="hover:bg-slate-800/50">
                     <td class="p-3 border-b border-slate-700 font-medium">${u.name}</td>
+                    <td class="p-3 border-b border-slate-700" style="text-align: center;">
+                        ${u.photo 
+                            ? `<div onclick="app.previewPhoto('${u.photo}')" class="cursor-pointer" style="width: 40px; height: 40px; border-radius: 50%; overflow: hidden; border: 2px solid var(--accent-primary); box-shadow: 0 4px 10px rgba(99,102,241,0.3); transition: transform 0.2s; margin: 0 auto;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'" title="Click to view full photo">
+                                <img src="data:image/jpeg;base64,${u.photo}" style="width: 100%; height: 100%; object-fit: cover;" />
+                               </div>`
+                            : `<div style="width: 40px; height: 40px; border-radius: 50%; background: rgba(255,255,255,0.05); border: 1px dashed rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.3); font-size: 0.9rem; margin: 0 auto;" title="No photo available">
+                                <i class="fas fa-user-slash"></i>
+                               </div>`
+                        }
+                    </td>
                     <td class="p-3 border-b border-slate-700 text-slate-400">${u.user_id}</td>
                     <td class="p-3 border-b border-slate-700 text-slate-300 text-sm">
                         <div style="display: flex; flex-direction: column; gap: 4px;">
@@ -505,7 +515,7 @@ const app = {
 
                     return `
                                 <div class="inline-flex items-center bg-slate-800/40 rounded-xl p-1 border border-slate-700/50 shadow-inner whitespace-nowrap gap-1">
-                                    ${(fpData && Array.isArray(fpData.indices) ? fpData.indices : []).map(f => `
+                                    ${(fpData && Array.isArray(fpData.indices) ? fpData.indices : (Array.isArray(fpData) ? fpData : [])).map(f => `
                                         <button class="finger-count-badge cursor-pointer hover:scale-110 transition-transform bg-transparent border-none p-0 flex items-center outline-none" 
                                             onclick="app.deleteFingerDirectFlow(${u.uid}, '${u.user_id}', ${f}, '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices)))}')" 
                                             title="Delete Finger ${f}">
@@ -525,13 +535,19 @@ const app = {
 
                     <td class="p-3 border-b border-slate-700">
                         <div class="actions-cell">
-                            <button class="btn btn-icon btn-blue" onclick="app.enrollFingerFlow(${u.uid}, '${u.user_id}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices)))}')" title="Enroll Finger">
+                            <button class="btn btn-icon btn-blue" onclick="app.enrollFingerFlow(${u.uid}, '${u.user_id}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices || [])))}')" title="Enroll Finger">
                                 <i class="fas fa-fingerprint"></i>
                             </button>
-                            <button class="btn btn-icon btn-blue" onclick="app.editUserFlow(${u.uid}, '${u.user_id}', '${(u.name || '').replace(/'/g, "\\'")}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices)))}', ${u.work_pattern_id || 'null'})" title="Edit User">
+                            <button class="btn btn-icon btn-purple" onclick="app.openWebcamModal('${u.user_id}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices || [])))}')" title="Take Face Photo">
+                                <i class="fas fa-camera"></i>
+                            </button>
+                            <button class="btn btn-icon btn-red" onclick="app.deleteFaceFlow(${u.uid}, '${u.user_id}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices || [])))}')" title="Delete Face">
+                                <i class="fas fa-user-astronaut"></i>
+                            </button>
+                            <button class="btn btn-icon btn-blue" onclick="app.editUserFlow(${u.uid}, '${u.user_id}', '${(u.name || '').replace(/'/g, "\\'")}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices || [])))}', ${u.work_pattern_id || 'null'})" title="Edit User">
                                 <i class="fas fa-edit"></i>
                             </button>
-                            <button class="btn btn-icon btn-red" onclick="app.deleteUserFlow(${u.uid}, '${u.user_id}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices)))}')" title="Delete User">
+                            <button class="btn btn-icon btn-red" onclick="app.deleteUserFlow(${u.uid}, '${u.user_id}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices || [])))}')" title="Delete User">
                                 <i class="fas fa-trash"></i>
                             </button>
                         </div>
@@ -677,6 +693,36 @@ const app = {
             }
         } catch (e) {
             this.showNotification('Error clearing fingers: ' + e.message, 'error');
+        }
+    },
+
+    async deleteFaceFlow(uid, userId, devicesEncoded) {
+        try {
+            const devices = JSON.parse(decodeURIComponent(atob(devicesEncoded)));
+            const devId = await this.promptDeviceSelection('Select Device to Delete Face From:', devices);
+            if (devId) {
+                this.deleteFace(uid, userId, devId);
+            }
+        } catch (e) {
+            this.showNotification('Error: ' + e.message, 'error');
+        }
+    },
+
+    async deleteFace(uid, userId, devId) {
+        if (!confirm(`Are you sure you want to delete the face for user ${userId}?`)) {
+            return;
+        }
+
+        const dev = this.devices.find(d => d.id == devId);
+        if (dev) {
+            this.showNotification(`Deleting face...`, 'info');
+            const res = await window.electronAPI.invoke('delete-user-face', { ip: dev.ip, ports: [dev.port1, dev.port2], uid, userId, deviceId: dev.id });
+            if (res.success) {
+                this.showNotification(`Face deleted`);
+                this.loadUsers();
+            } else {
+                this.showNotification('Failed: ' + res.error, 'error');
+            }
         }
     },
 
@@ -851,6 +897,38 @@ const app = {
         if (cancelBtn) cancelBtn.style.display = 'none';
         
         this.updateDeviceSelects(); // resets checkboxes to all checked
+    },
+
+    async scanDevices() {
+        const btn = document.getElementById('scan-devices-btn');
+        const originalHtml = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Listening (10s)...';
+        btn.disabled = true;
+        
+        try {
+            const res = await window.electronAPI.invoke('scan-devices', 10000);
+            if (res.success && res.devices && res.devices.length > 0) {
+                // Filter out devices already in the list
+                const newDevices = res.devices.filter(sn => !this.devices.some(d => d.sn === sn));
+                if (newDevices.length > 0) {
+                    const sn = newDevices[0];
+                    if (confirm(`Discovered new device with SN: ${sn}\n\nDo you want to add it?`)) {
+                        document.getElementById('device-name').value = `Auto Device ${sn.substring(0, 4)}`;
+                        document.getElementById('device-sn').value = sn;
+                        this.addDevice();
+                    }
+                } else {
+                    this.showNotification('No new unadded devices found.', 'info');
+                }
+            } else {
+                this.showNotification('No devices connected during scan.', 'info');
+            }
+        } catch (e) {
+            this.showNotification('Error scanning: ' + e.message, 'error');
+        } finally {
+            btn.innerHTML = originalHtml;
+            btn.disabled = false;
+        }
     },
 
     async addDevice() {
@@ -2203,12 +2281,13 @@ const app = {
             '#users-page .card:nth-child(2) .section-header button:nth-of-type(1)': `<i class="fas fa-download"></i> ${trans.btn_fetch_all}`,
             '#users-page .card:nth-child(2) .section-header button:nth-of-type(2)': `<i class="fas fa-fingerprint"></i> ${trans.btn_sync_bio}`,
             '#users-table th:nth-child(1)': trans.col_name,
-            '#users-table th:nth-child(2)': trans.col_id,
-            '#users-table th:nth-child(3)': trans.col_device,
-            '#users-table th:nth-child(4)': trans.role,
-            '#users-table th:nth-child(5)': 'Work Pattern',
-            '#users-table th:nth-child(6)': trans.col_bio_status,
-            '#users-table th:nth-child(7)': trans.col_actions,
+            '#users-table th:nth-child(2)': 'Photo',
+            '#users-table th:nth-child(3)': trans.col_id,
+            '#users-table th:nth-child(4)': trans.col_device,
+            '#users-table th:nth-child(5)': trans.role,
+            '#users-table th:nth-child(6)': 'Work Pattern',
+            '#users-table th:nth-child(7)': trans.col_bio_status,
+            '#users-table th:nth-child(8)': trans.col_actions,
             
             // Schedules
             '.schedules-tabs button[data-tab="tab-define-shifts"]': `<i class="fas fa-clock" style="color: #818cf8;"></i> ${trans.tab_define_shifts}`,
@@ -2461,9 +2540,218 @@ const app = {
                     `<option value="off">${this.translations[this.currentLang || 'en'].option_off_day} 😴</option>` + 
                     this.shifts.map(s => `<option value="${s.id}">${s.name} (${s.start_time} - ${s.end_time}) 🕒</option>`).join('');
             }
+        } catch (e) { console.error(e); }
+    },
+
+    // --- Webcam Feature ---
+    currentWebcamStream: null,
+    currentWebcamUserId: null,
+    currentWebcamDevices: null,
+    currentWebcamBase64: null,
+
+    async openWebcamModal(userId, devicesB64) {
+        this.currentWebcamUserId = userId;
+        try {
+            if (devicesB64 === "dW5kZWZpbmVk") throw new Error("Undefined devices"); // "undefined" in base64
+            this.currentWebcamDevices = JSON.parse(decodeURIComponent(atob(devicesB64)));
+        } catch (e) {
+            this.currentWebcamDevices = [];
+        }
+
+        if (!this.currentWebcamDevices || this.currentWebcamDevices.length === 0) {
+            this.showNotification('Error: User must be assigned to at least one device first.', 'error');
+            return;
+        }
+
+        const modal = document.getElementById('webcam-modal');
+        const video = document.getElementById('webcam-video');
+        const preview = document.getElementById('webcam-preview');
+        
+        const btnLocal = document.getElementById('btn-local-photo');
+        if (btnLocal) btnLocal.style.display = 'inline-flex';
+        
+        const btnCapture = document.getElementById('btn-webcam-capture');
+        if (btnCapture) btnCapture.style.display = 'inline-flex';
+        
+        const btnRetake = document.getElementById('btn-webcam-retake');
+        if (btnRetake) btnRetake.style.display = 'none';
+        
+        const btnUpload = document.getElementById('btn-webcam-upload');
+        if (btnUpload) btnUpload.style.display = 'none';
+        
+        const status = document.getElementById('webcam-status');
+        if (status) status.innerText = 'Starting camera...';
+        
+        if (video) video.style.display = 'block';
+        if (preview) preview.style.display = 'none';
+        
+        if (modal) {
+            modal.classList.add('active');
+        } else {
+            alert("Error: webcam-modal not found in HTML!");
+            return;
+        }
+
+        try {
+            this.currentWebcamStream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+            video.srcObject = this.currentWebcamStream;
+            document.getElementById('webcam-status').innerText = 'Camera active. Please capture or choose photo.';
+        } catch (err) {
+            console.error('Webcam Error:', err);
+            document.getElementById('webcam-status').innerText = 'Failed to access camera. You can still choose from PC.';
+        }
+    },
+
+    handleLocalPhotoSelection(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const dataUrl = e.target.result;
+            this.currentWebcamBase64 = dataUrl.split(',')[1];
+            
+            const preview = document.getElementById('webcam-preview');
+            const video = document.getElementById('webcam-video');
+            
+            video.style.display = 'none';
+            preview.style.display = 'block';
+            preview.src = dataUrl;
+
+            const btnLocal = document.getElementById('btn-local-photo');
+            if(btnLocal) btnLocal.style.display = 'none';
+            
+            const btnCapture = document.getElementById('btn-webcam-capture');
+            if(btnCapture) btnCapture.style.display = 'none';
+            
+            const btnRetake = document.getElementById('btn-webcam-retake');
+            if(btnRetake) btnRetake.style.display = 'inline-flex';
+            
+            const btnUpload = document.getElementById('btn-webcam-upload');
+            if(btnUpload) btnUpload.style.display = 'inline-flex';
+            
+            const status = document.getElementById('webcam-status');
+            if(status) status.innerText = 'Local photo loaded. Ready to upload.';
+            
+            // Stop webcam if running
+            if (this.currentWebcamStream) {
+                this.currentWebcamStream.getTracks().forEach(track => track.stop());
+                this.currentWebcamStream = null;
+                document.getElementById('webcam-video').srcObject = null;
+            }
+        };
+        reader.readAsDataURL(file);
+    },
+
+    captureWebcamPhoto() {
+        const video = document.getElementById('webcam-video');
+        const canvas = document.getElementById('webcam-canvas');
+        const preview = document.getElementById('webcam-preview');
+
+        // Draw video frame to canvas
+        canvas.width = video.videoWidth || 640;
+        canvas.height = video.videoHeight || 480;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        // Get base64 string
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85); // Compress slightly
+        this.currentWebcamBase64 = dataUrl.split(',')[1]; // Remove data URI prefix
+
+        // Switch UI to preview mode
+        video.style.display = 'none';
+        preview.style.display = 'block';
+        preview.src = dataUrl;
+
+        document.getElementById('btn-local-photo').style.display = 'none';
+        document.getElementById('btn-webcam-capture').style.display = 'none';
+        document.getElementById('btn-webcam-retake').style.display = 'inline-flex';
+        document.getElementById('btn-webcam-upload').style.display = 'inline-flex';
+        document.getElementById('webcam-status').innerText = 'Photo captured. Ready to upload.';
+    },
+
+    async retakeWebcamPhoto() {
+        document.getElementById('webcam-video').style.display = 'block';
+        document.getElementById('webcam-preview').style.display = 'none';
+        
+        document.getElementById('btn-local-photo').style.display = 'inline-flex';
+        document.getElementById('btn-webcam-capture').style.display = 'inline-flex';
+        document.getElementById('btn-webcam-retake').style.display = 'none';
+        document.getElementById('btn-webcam-upload').style.display = 'none';
+        
+        const localInput = document.getElementById('local-photo-input');
+        if(localInput) localInput.value = '';
+        
+        this.currentWebcamBase64 = null;
+
+        if (!this.currentWebcamStream) {
+            document.getElementById('webcam-status').innerText = 'Restarting camera...';
+            try {
+                this.currentWebcamStream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+                document.getElementById('webcam-video').srcObject = this.currentWebcamStream;
+                document.getElementById('webcam-status').innerText = 'Camera active. Please capture or choose photo.';
+            } catch (err) {
+                console.error('Webcam Error:', err);
+                document.getElementById('webcam-status').innerText = 'Failed to access camera. You can still choose from PC.';
+            }
+        } else {
+            document.getElementById('webcam-status').innerText = 'Camera active. Please capture or choose photo.';
+        }
+    },
+
+    async uploadWebcamPhoto() {
+        if (!this.currentWebcamBase64 || !this.currentWebcamUserId || !this.currentWebcamDevices) return;
+        
+        document.getElementById('webcam-status').innerText = 'Uploading to devices...';
+        document.getElementById('btn-webcam-upload').disabled = true;
+
+        try {
+            for (const dev of this.currentWebcamDevices) {
+                await window.electronAPI.invoke('upload-face-photo', { 
+                    ip: dev.ip, 
+                    deviceId: dev.id, 
+                    userId: this.currentWebcamUserId, 
+                    photoBase64: this.currentWebcamBase64 
+                });
+            }
+            this.showNotification('Photo uploaded to devices successfully!', 'success');
+            this.closeWebcamModal();
         } catch (e) {
             console.error(e);
+            document.getElementById('webcam-status').innerText = 'Upload failed.';
+        } finally {
+            document.getElementById('btn-webcam-upload').disabled = false;
         }
+    },
+
+    previewPhoto(base64Data) {
+        const modal = document.getElementById('photo-preview-modal');
+        const img = document.getElementById('photo-preview-img');
+        if (modal && img) {
+            img.src = `data:image/jpeg;base64,${base64Data}`;
+            modal.style.display = 'flex';
+            setTimeout(() => modal.classList.add('active'), 10);
+        }
+    },
+
+    closeWebcamModal() {
+        if (this.currentWebcamStream) {
+            this.currentWebcamStream.getTracks().forEach(track => track.stop());
+            this.currentWebcamStream = null;
+        }
+        
+        const video = document.getElementById('webcam-video');
+        if (video) video.srcObject = null;
+        
+        const modal = document.getElementById('webcam-modal');
+        if (modal) modal.classList.remove('active');
+        
+        const localInput = document.getElementById('local-photo-input');
+        if (localInput) localInput.value = '';
+        
+        this.currentWebcamBase64 = null;
+        this.currentWebcamUserId = null;
+        this.currentWebcamDevices = null;
     },
 
     async deleteShift(id) {

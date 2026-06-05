@@ -5,6 +5,29 @@ const { db } = require('./db');
 let server = null;
 let pendingCommands = [];
 let cmdIdCounter = 200;
+let discoveredDevices = new Set();
+
+function getDiscoveredDevices() {
+    return Array.from(discoveredDevices);
+}
+
+function clearDiscoveredDevices() {
+    discoveredDevices.clear();
+}
+
+async function handleDeviceSeen(sn, mainWindow) {
+    if (!sn) return;
+    try {
+        let dev = await db('devices').where('sn', sn).first();
+        if (dev) {
+            await db('devices').where('id', dev.id).update({ last_seen: Date.now() });
+        } else {
+            discoveredDevices.add(sn);
+        }
+    } catch (e) {
+        console.error(`[ADMS] Error handling device seen: ${e.message}`);
+    }
+}
 
 function startAdmsServer(port = 80, mainWindow = null) {
     if (server) {
@@ -26,7 +49,7 @@ function startAdmsServer(port = 80, mainWindow = null) {
         if (pathname === '/iclock/cdata') {
             if (req.method === 'GET') {
                 console.log(`[ADMS] Handshake from SN: ${query.SN}`);
-                if (query.SN) await db('devices').where('sn', query.SN).update({ last_seen: Date.now() });
+                await handleDeviceSeen(query.SN, mainWindow);
                 res.writeHead(200, { 'Content-Type': 'text/plain' });
                 res.end('OK');
             } else if (req.method === 'POST') {
@@ -47,7 +70,7 @@ function startAdmsServer(port = 80, mainWindow = null) {
                 });
             }
         } else if (pathname === '/iclock/getrequest') {
-            if (query.SN) await db('devices').where('sn', query.SN).update({ last_seen: Date.now() });
+            await handleDeviceSeen(query.SN, mainWindow);
             if (pendingCommands.length > 0) {
                 const cmdString = pendingCommands.map(cmd => {
                     cmdIdCounter++;
@@ -62,7 +85,7 @@ function startAdmsServer(port = 80, mainWindow = null) {
                 res.end('OK');
             }
         } else if (pathname === '/iclock/devicecmd') {
-            if (query.SN) await db('devices').where('sn', query.SN).update({ last_seen: Date.now() });
+            await handleDeviceSeen(query.SN, mainWindow);
             let body = '';
             req.on('data', chunk => body += chunk.toString());
             req.on('end', () => {
@@ -152,18 +175,79 @@ async function processAdmsData(table, data, sn, mainWindow) {
         }
         if (mainWindow) mainWindow.webContents.send('sync-progress', 'Attendance synced via ADMS');
     } 
-    else if (table === 'USER' || table === 'OPERLOG' || table === 'USERINFO') {
+    else if (table === 'USER' || table === 'OPERLOG' || (table || '').toUpperCase() === 'USERINFO') {
         for (const line of lines) {
-            // OPERLOG 4 means deletion. We should handle it!
-            // Format: OPLOG 4 0 2026-06-01 13:05:33 0 0 0 0 (We can't easily parse UID from this log without extra work, so skip for now)
-            
-            let userId = (line.match(/PIN=([^ \t]+)/i) || [])[1];
-            let name = (line.match(/Name=([^ \t]+)/i) || [])[1] || 'Unknown';
-            let roleMatch = line.match(/Pri=([^ \t]+)/i);
+            if (line.startsWith('BIOPHOTO') || line.startsWith('USERPIC')) {
+                // Inline parse BIOPHOTO and USERPIC
+                let userIdMatch = line.match(/\bPIN=([^\t\s]+)/i) || line.match(/\bPin=([^\t\s]+)/i);
+                let userId = userIdMatch ? userIdMatch[1].trim() : null;
+                let typeMatch = line.match(/\bType=([^\t\s]+)/i);
+                // Type 9 is Face Photo, Type 0/1/etc is fingerprint. USERPIC doesn't send Type, so we assume it's a photo
+                let type = typeMatch ? parseInt(typeMatch[1]) : 9;
+                
+                let contentMatch = line.match(/Content=(.*)/i) || line.match(/TMP=(.*)/i);
+                let content = contentMatch ? contentMatch[1].trim() : null;
+
+                if (userId && content && (type === 9 || line.startsWith('USERPIC'))) {
+                    try {
+                        await db('users').where({ user_id: userId }).update({
+                            photo: content,
+                            last_sync_time: Date.now()
+                        });
+                        console.log(`[ADMS] Saved BioPhoto/UserPic for User ${userId} (from OPERLOG)`);
+                    } catch(e) {}
+                }
+                continue;
+            }
+            if (line.startsWith('BIODATA') || line.startsWith('templatev10') || line.startsWith('fingrtmp')) {
+                // Inline parse BIODATA
+                let userIdMatch = line.match(/\bPIN=([^\t\s]+)/i) || line.match(/\bPin=([^\t\s]+)/i);
+                let userId = userIdMatch ? userIdMatch[1].trim() : null;
+                let fingerIdMatch = line.match(/\bFID=([^\t\s]+)/i) || line.match(/\bFingerID=([^\t\s]+)/i) || line.match(/\bNo=([^\t\s]+)/i);
+                let fingerId = fingerIdMatch ? parseInt(fingerIdMatch[1]) : 0;
+                let typeMatch = line.match(/\bType=([^\t\s]+)/i);
+                let type = typeMatch ? parseInt(typeMatch[1]) : 1;
+
+                if (userId && type === 1) {
+                    try {
+                        let user = await db('users').where({ user_id: userId, device_id: device.id }).first();
+                        if (user) {
+                            let fpData = { count: 0, indices: [] };
+                            try { fpData = JSON.parse(user.fingerprints || '{"count":0,"indices":[]}'); } catch(e){}
+                            
+                            // If index not already present, add it
+                            if (!fpData.indices.includes(fingerId)) {
+                                fpData.indices.push(fingerId);
+                                fpData.count = fpData.indices.length;
+                                await db('users').where({ id: user.id }).update({
+                                    fingerprints: JSON.stringify(fpData)
+                                });
+                                console.log(`[ADMS] Saved template ${fingerId} for User ${userId} (from OPERLOG)`);
+                            }
+                        }
+                    } catch(e) {}
+                }
+                continue;
+            }
+
+            let userId = (line.match(/\bPIN=([^\t\s]+)/i) || [])[1];
+            if (userId) userId = userId.trim();
+            let nameMatch = line.match(/\bName=([^\t]+)/i);
+            let name = nameMatch ? nameMatch[1].trim() : 'Unknown';
+            let roleMatch = line.match(/\bPri=([^\t\s]+)/i);
             let role = roleMatch ? parseInt(roleMatch[1]) : 0;
 
             if (userId) {
+                console.log(`[DEBUG USER PARSE] line: "${line}" -> userId: ${userId}, name: ${name}`);
                 try {
+                    let updateData = {
+                        role: role,
+                        last_sync_time: Date.now()
+                    };
+                    if (name !== 'Unknown') {
+                        updateData.name = name;
+                    }
+
                     await db('users').insert({
                         uid: parseInt(userId),
                         user_id: userId,
@@ -172,26 +256,25 @@ async function processAdmsData(table, data, sn, mainWindow) {
                         device_id: device.id,
                         fingerprints: '{"count": 0, "indices": []}',
                         last_sync_time: Date.now()
-                    }).onConflict(['user_id', 'device_id']).merge({
-                        name: name,
-                        role: role,
-                        last_sync_time: Date.now()
-                    });
+                    }).onConflict(['user_id', 'device_id']).merge(updateData);
+                    
                     console.log(`[ADMS] Inserted/Updated user: ${userId} - ${name}`);
-                } catch(e) { console.error('[ADMS] DB Error saving user:', e); }
+                } catch(e) {}
             }
         }
         if (mainWindow) mainWindow.webContents.send('sync-progress', 'Users synced via ADMS');
     }
-    else if (table === 'templatev10' || table === 'BIODATA') {
+    else if (table === 'templatev10' || table === 'fingrtmp' || table === 'BIODATA') {
         for (const line of lines) {
-            let userId = (line.match(/Pin=([^ \t]+)/i) || [])[1];
-            let fingerIdMatch = line.match(/No=([^ \t]+)/i) || line.match(/FID=([^ \t]+)/i) || line.match(/FingerID=([^ \t]+)/i);
+                    
+            let userIdMatch = line.match(/\bPIN=([^\t\s]+)/i) || line.match(/\bPin=([^\t\s]+)/i);
+            let userId = userIdMatch ? userIdMatch[1].trim() : null;
+            let fingerIdMatch = line.match(/\bFID=([^\t\s]+)/i) || line.match(/\bFingerID=([^\t\s]+)/i) || line.match(/\bNo=([^\t\s]+)/i);
             let fingerId = fingerIdMatch ? parseInt(fingerIdMatch[1]) : 0;
-            let typeMatch = line.match(/Type=([^ \t]+)/i);
+            let typeMatch = line.match(/\bType=([^\t\s]+)/i);
             let type = typeMatch ? parseInt(typeMatch[1]) : 1;
 
-            if (userId) {
+            if (userId && type === 1) {
                 try {
                     let u = await db('users').where({ user_id: userId, device_id: device.id }).first();
                     
@@ -212,7 +295,14 @@ async function processAdmsData(table, data, sn, mainWindow) {
 
                     if (u) {
                         let fpData = { count: 0, indices: [] };
-                        try { fpData = JSON.parse(u.fingerprints || '{"count":0, "indices":[]}'); } catch(e){}
+                        try { 
+                            let parsed = JSON.parse(u.fingerprints || '{"count":0, "indices":[]}'); 
+                            if (Array.isArray(parsed)) {
+                                fpData = { count: parsed.length, indices: parsed };
+                            } else if (parsed && Array.isArray(parsed.indices)) {
+                                fpData = parsed;
+                            }
+                        } catch(e){}
                         
                         if (!fpData.indices.includes(fingerId)) {
                             fpData.indices.push(fingerId);
@@ -231,10 +321,35 @@ async function processAdmsData(table, data, sn, mainWindow) {
         }
         if (mainWindow) mainWindow.webContents.send('sync-progress', 'BioData synced via ADMS');
     }
+    else if (table === 'BIOPHOTO') {
+        for (const line of lines) {
+            let userIdMatch = line.match(/\bPIN=([^\t\s]+)/i) || line.match(/\bPin=([^\t\s]+)/i);
+            let userId = userIdMatch ? userIdMatch[1].trim() : null;
+            let typeMatch = line.match(/\bType=([^\t\s]+)/i);
+            let type = typeMatch ? parseInt(typeMatch[1]) : 9;
+            
+            // Extract the base64 content
+            let contentMatch = line.match(/Content=(.*)/i) || line.match(/TMP=(.*)/i);
+            let content = contentMatch ? contentMatch[1].trim() : null;
+
+            if (userId && content && type === 9) {
+                try {
+                    await db('users').where({ user_id: userId }).update({
+                        photo: content,
+                        last_sync_time: Date.now()
+                    });
+                    console.log(`[ADMS] Saved BioPhoto for User ${userId}`);
+                } catch(e) { console.error('[ADMS] Error saving BioPhoto:', e); }
+            }
+        }
+        if (mainWindow) mainWindow.webContents.send('sync-progress', 'Photos synced via ADMS');
+    }
 }
 
 module.exports = {
     startAdmsServer,
     stopAdmsServer,
-    queueAdmsCommand
+    queueAdmsCommand,
+    getDiscoveredDevices,
+    clearDiscoveredDevices
 };
