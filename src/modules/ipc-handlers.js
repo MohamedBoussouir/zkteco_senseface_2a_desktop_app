@@ -297,6 +297,8 @@ function setupIpcHandlers(mainWindow) {
             const binarySize = Buffer.from(photoBase64, 'base64').length;
             // Type 9 is Face in BIOPHOTO
             queueAdmsCommand(`DATA UPDATE BIOPHOTO PIN=${userId}\tType=9\tSize=${binarySize}\tContent=${photoBase64}`);
+            // Also update USERPIC so it displays on the screen
+            queueAdmsCommand(`DATA UPDATE USERPIC PIN=${userId}\tSize=${binarySize}\tContent=${photoBase64}`);
             
             // Save photo to local database
             await db('users').where('user_id', userId).update({ photo: photoBase64 });
