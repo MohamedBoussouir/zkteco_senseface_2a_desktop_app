@@ -196,8 +196,15 @@
                                 <option value="">None (Use Default)</option>
                             </select>
                         </div>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label>Password <span style="font-size: 0.75rem; color: var(--text-muted);">(Optional)</span></label>
+                            <input type="password" id="user-password" placeholder="e.g. 12345">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label>Card Code <span style="font-size: 0.75rem; color: var(--text-muted);">(Optional)</span></label>
+                            <input type="text" id="user-card" placeholder="e.g. 55667788">
+                        </div>
                     </div>
-                    <input type="hidden" id="user-password" value="">
                     <div style="display:flex; gap:15px; justify-content: flex-end;">
                         <button type="button" class="btn btn-secondary" id="user-cancel-btn" style="display:none; padding: 10px 30px;" onclick="app.resetUserForm()">Cancel</button>
                         <button type="submit" class="btn btn-primary" id="user-submit-btn" style="padding: 10px 30px;">Create User on Device</button>
@@ -221,13 +228,9 @@
                     <table id="users-table">
                         <thead>
                             <tr>
-                                <th>Name</th>
-                                <th>Photo</th>
-                                <th>ID</th>
-                                <th>Device</th>
-                                <th>Role</th>
-                                <th>Work Pattern</th>
-                                <th>Bio Status</th>
+                                <th>Employee Info</th>
+                                <th>Assignment</th>
+                                <th>Credentials</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>

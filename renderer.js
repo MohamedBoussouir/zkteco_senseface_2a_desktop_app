@@ -107,10 +107,16 @@ const app = {
         // Listen for ADMS background data sync events
         window.electronAPI.on('sync-progress', (msg) => {
             this.showNotification(msg, 'success');
-            // If the user is currently looking at the users page, refresh it to show the new data instantly
-            const usersPage = document.getElementById('users-page');
-            if (usersPage && usersPage.classList.contains('active')) {
-                this.loadUsers();
+            
+            if (msg === 'Fingerprint enrolled successfully') {
+                // Auto-fetch fingerprints from the device to update the UI
+                this.syncAllBio();
+            } else {
+                // If the user is currently looking at the users page, refresh it to show the new data instantly
+                const usersPage = document.getElementById('users-page');
+                if (usersPage && usersPage.classList.contains('active')) {
+                    this.loadUsers();
+                }
             }
         });
 
@@ -475,66 +481,81 @@ const app = {
         }
 
         tbody.innerHTML = currentData.map(u => {
+            const roleBadge = parseInt(u.role) === 14 
+                ? `<span class="status-badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3); padding: 2px 6px; font-size: 0.7rem;"><i class="fas fa-shield-halved mr-1"></i> Admin</span>` 
+                : `<span class="status-badge" style="background: rgba(100, 116, 139, 0.15); color: #94a3b8; border: 1px solid rgba(100, 116, 139, 0.3); padding: 2px 6px; font-size: 0.7rem;"><i class="fas fa-user mr-1"></i> User</span>`;
+            
+            const devicesHtml = u.assigned_devices ? u.assigned_devices.map(d => `<div class="badge badge-info" style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border-radius: 4px; background: rgba(56, 189, 248, 0.1); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.2); font-size: 0.7rem;"><i class="fas fa-desktop"></i> <span>${d.name}</span></div>`).join('') : '';
+
+            // Bio / Fingers
+            let fpData = null;
+            try { fpData = JSON.parse(u.fingerprints || 'null'); } catch (e) { }
+            const count = fpData && typeof fpData === 'object' && fpData.count !== undefined
+                ? fpData.count
+                : (Array.isArray(fpData) ? fpData.length : 0);
+
+            let fingersHtml = '';
+            if (count > 0) {
+                fingersHtml = `
+                    <div class="inline-flex items-center bg-slate-800/40 rounded-xl p-1 border border-slate-700/50 shadow-inner whitespace-nowrap gap-1">
+                        ${(fpData && Array.isArray(fpData.indices) ? fpData.indices : (Array.isArray(fpData) ? fpData : [])).map(f => `
+                            <button class="cursor-pointer hover:scale-110 transition-transform bg-transparent border-none p-0 flex items-center outline-none text-sky-400" 
+                                onclick="app.deleteFingerDirectFlow(${u.uid}, '${u.user_id}', ${f}, '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices)))}')" 
+                                title="Delete Finger ${f}" style="font-size: 0.75rem; padding: 2px 4px;">
+                                <i class="fas fa-fingerprint"></i> <span class="ml-1">${f}</span>
+                            </button>
+                        `).join('')}
+                        
+                        <div class="border-l border-slate-700/50 pl-1 ml-1 flex items-center">
+                            <button class="btn btn-xs btn-red" onclick="app.deleteAllFingersFlow(${u.uid}, '${u.user_id}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices)))}')" title="Delete All Fingers" style="padding: 2px 4px;">
+                                <i class="fas fa-eraser"></i>
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Other credentials
+            const faceHtml = u.photo ? `<div class="inline-flex items-center gap-1" style="background: rgba(168, 85, 247, 0.1); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.2); padding: 4px 8px; border-radius: 8px; font-size: 0.8rem;" title="Face Enrolled"><i class="fas fa-camera"></i></div>` : '';
+            const passHtml = u.password ? `<div class="inline-flex items-center gap-1" style="background: rgba(250, 204, 21, 0.1); color: #facc15; border: 1px solid rgba(250, 204, 21, 0.2); padding: 4px 8px; border-radius: 8px; font-size: 0.8rem;" title="Password Enrolled"><i class="fas fa-key"></i></div>` : '';
+            const cardHtml = u.card_number ? `<div class="inline-flex items-center gap-1" style="background: rgba(52, 211, 153, 0.1); color: #34d399; border: 1px solid rgba(52, 211, 153, 0.2); padding: 4px 8px; border-radius: 8px; font-size: 0.8rem;" title="Card Enrolled"><i class="fas fa-id-card"></i></div>` : '';
+
+            const noCredsHtml = (!count && !u.photo && !u.password && !u.card_number) ? `<span class="text-slate-600 italic text-xs">No credentials</span>` : '';
+
             return `
                 <tr class="hover:bg-slate-800/50">
-                    <td class="p-3 border-b border-slate-700 font-medium">${u.name}</td>
-                    <td class="p-3 border-b border-slate-700" style="text-align: center;">
-                        ${u.photo 
-                            ? `<div onclick="app.previewPhoto('${u.photo}')" class="cursor-pointer" style="width: 40px; height: 40px; border-radius: 50%; overflow: hidden; border: 2px solid var(--accent-primary); box-shadow: 0 4px 10px rgba(99,102,241,0.3); transition: transform 0.2s; margin: 0 auto;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'" title="Click to view full photo">
-                                <img src="data:image/jpeg;base64,${u.photo}" style="width: 100%; height: 100%; object-fit: cover;" />
-                               </div>`
-                            : `<div style="width: 40px; height: 40px; border-radius: 50%; background: rgba(255,255,255,0.05); border: 1px dashed rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.3); font-size: 0.9rem; margin: 0 auto;" title="No photo available">
-                                <i class="fas fa-user-slash"></i>
-                               </div>`
-                        }
+                    <td class="p-3 border-b border-slate-700">
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            ${u.photo 
+                                ? `<div onclick="app.previewPhoto('${u.photo}')" class="cursor-pointer" style="width: 36px; height: 36px; border-radius: 50%; overflow: hidden; border: 2px solid var(--accent-primary); flex-shrink: 0;"><img src="data:image/jpeg;base64,${u.photo}" style="width: 100%; height: 100%; object-fit: cover;" /></div>`
+                                : `<div style="width: 36px; height: 36px; border-radius: 50%; background: rgba(255,255,255,0.05); border: 1px dashed rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.3); font-size: 0.8rem; flex-shrink: 0;"><i class="fas fa-user-slash"></i></div>`
+                            }
+                            <div>
+                                <div class="font-medium text-slate-200">${u.name}</div>
+                                <div class="text-slate-400 text-xs">ID: ${u.user_id}</div>
+                            </div>
+                        </div>
                     </td>
-                    <td class="p-3 border-b border-slate-700 text-slate-400">${u.user_id}</td>
-                    <td class="p-3 border-b border-slate-700 text-slate-300 text-sm">
-                        <div style="display: flex; flex-direction: column; gap: 4px;">
-                            ${u.assigned_devices ? u.assigned_devices.map(d => `<div class="badge badge-info" style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 6px; background: rgba(56, 189, 248, 0.1); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.2); font-size: 0.75rem;"><i class="fas fa-desktop"></i> <span>${d.name}</span> <span style="opacity: 0.6; font-family: monospace;">${d.ip}</span></div>`).join('') : ''}
+                    <td class="p-3 border-b border-slate-700 text-sm">
+                        <div style="display: flex; flex-direction: column; gap: 6px;">
+                            <div style="display: flex; gap: 5px; flex-wrap: wrap;">${devicesHtml}</div>
+                            <div style="display: flex; gap: 5px; flex-wrap: wrap; align-items: center;">
+                                ${roleBadge}
+                                <span class="text-emerald-400 text-xs px-2 py-0.5 rounded bg-emerald-400/10 border border-emerald-400/20">${u.pattern_name || 'Default Schedule'}</span>
+                            </div>
                         </div>
                     </td>
                     <td class="p-3 border-b border-slate-700">
-                        ${parseInt(u.role) === 14 
-                            ? `<span class="status-badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);"><i class="fas fa-shield-halved mr-1"></i> Admin</span>` 
-                            : `<span class="status-badge" style="background: rgba(100, 116, 139, 0.15); color: #94a3b8; border: 1px solid rgba(100, 116, 139, 0.3);"><i class="fas fa-user mr-1"></i> User</span>`
-                        }
+                        <div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
+                            ${fingersHtml}
+                            ${faceHtml}
+                            ${passHtml}
+                            ${cardHtml}
+                            ${noCredsHtml}
+                        </div>
                     </td>
                     <td class="p-3 border-b border-slate-700">
-                        <span class="text-emerald-400 font-medium text-xs">${u.pattern_name || 'None (Use Default)'}</span>
-                    </td>
-                    <td class="p-3 border-b border-slate-700">
-                        ${(() => {
-                    let fpData = null;
-                    try { fpData = JSON.parse(u.fingerprints || 'null'); } catch (e) { }
-                    const count = fpData && typeof fpData === 'object' && fpData.count !== undefined
-                        ? fpData.count
-                        : (Array.isArray(fpData) ? fpData.length : 0);
-
-                    if (count === 0) return '<span class="text-slate-600 italic text-xs">No fingerprints</span>';
-
-                    return `
-                                <div class="inline-flex items-center bg-slate-800/40 rounded-xl p-1 border border-slate-700/50 shadow-inner whitespace-nowrap gap-1">
-                                    ${(fpData && Array.isArray(fpData.indices) ? fpData.indices : (Array.isArray(fpData) ? fpData : [])).map(f => `
-                                        <button class="finger-count-badge cursor-pointer hover:scale-110 transition-transform bg-transparent border-none p-0 flex items-center outline-none" 
-                                            onclick="app.deleteFingerDirectFlow(${u.uid}, '${u.user_id}', ${f}, '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices)))}')" 
-                                            title="Delete Finger ${f}">
-                                            <i class="fas fa-fingerprint"></i> <span class="ml-1">${f}</span>
-                                        </button>
-                                    `).join('')}
-                                    
-                                    <div class="border-l border-slate-700/50 pl-1 ml-1 flex items-center">
-                                        <button class="btn btn-xs btn-red" onclick="app.deleteAllFingersFlow(${u.uid}, '${u.user_id}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices)))}')" title="Clear All Data">
-                                            <i class="fas fa-eraser"></i>
-                                        </button>
-                                    </div>
-                                </div>
-                            `;
-                })()}
-                    </td>
-
-                    <td class="p-3 border-b border-slate-700">
-                        <div class="actions-cell">
+                        <div class="actions-cell" style="justify-content: flex-start;">
                             <button class="btn btn-icon btn-blue" onclick="app.enrollFingerFlow(${u.uid}, '${u.user_id}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices || [])))}')" title="Enroll Finger">
                                 <i class="fas fa-fingerprint"></i>
                             </button>
@@ -544,7 +565,7 @@ const app = {
                             <button class="btn btn-icon btn-red" onclick="app.deleteFaceFlow(${u.uid}, '${u.user_id}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices || [])))}')" title="Delete Face">
                                 <i class="fas fa-user-astronaut"></i>
                             </button>
-                            <button class="btn btn-icon btn-blue" onclick="app.editUserFlow(${u.uid}, '${u.user_id}', '${(u.name || '').replace(/'/g, "\\'")}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices || [])))}', ${u.work_pattern_id || 'null'})" title="Edit User">
+                            <button class="btn btn-icon btn-blue" onclick="app.editUserFlow(${u.uid}, '${u.user_id}', '${(u.name || '').replace(/'/g, "\\'")}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices || [])))}', ${u.work_pattern_id || 'null'}, '${(u.password || '').replace(/'/g, "\\'")}', '${(u.card_number || '').replace(/'/g, "\\'")}')" title="Edit User & Set Credentials">
                                 <i class="fas fa-edit"></i>
                             </button>
                             <button class="btn btn-icon btn-red" onclick="app.deleteUserFlow(${u.uid}, '${u.user_id}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices || [])))}')" title="Delete User">
@@ -660,12 +681,12 @@ const app = {
         }
     },
     
-    async editUserFlow(uid, userId, name, devicesEncoded, workPatternId) {
+    async editUserFlow(uid, userId, name, devicesEncoded, workPatternId, password, cardNumber) {
         try {
             const devices = JSON.parse(decodeURIComponent(atob(devicesEncoded)));
             const devId = await this.promptDeviceSelection('Select Device to Edit:', devices);
             if (devId) {
-                this.editUser(uid, userId, name, devId, workPatternId);
+                this.editUser(uid, userId, name, devId, workPatternId, password, cardNumber);
             }
         } catch (e) {
             this.showNotification('Error editing user: ' + e.message, 'error');
@@ -795,6 +816,12 @@ const app = {
         let workPatternId = wpEl ? wpEl.value : null;
         if (workPatternId === "") workPatternId = null;
 
+        const passwordEl = document.getElementById('user-password');
+        const password = passwordEl ? passwordEl.value : '';
+        
+        const cardEl = document.getElementById('user-card');
+        const cardNumber = cardEl ? cardEl.value : '';
+
         let uid = null;
         const uidEl = document.getElementById('user-uid');
         if (uidEl && uidEl.value) uid = uidEl.value;
@@ -834,7 +861,8 @@ const app = {
                 userId, 
                 name, 
                 role, 
-                password: '', 
+                password: password,
+                card_number: cardNumber,
                 deviceId: dev.id,
                 work_pattern_id: workPatternId 
             });
@@ -852,9 +880,15 @@ const app = {
         }
     },
 
-    editUser(uid, userId, name, deviceId, workPatternId) {
+    editUser(uid, userId, name, deviceId, workPatternId, password, cardNumber) {
         document.getElementById('user-name').value = name;
         document.getElementById('user-id').value = userId;
+        
+        const passEl = document.getElementById('user-password');
+        if (passEl) passEl.value = password || '';
+        
+        const cardEl = document.getElementById('user-card');
+        if (cardEl) cardEl.value = cardNumber || '';
         
         let uidEl = document.getElementById('user-uid');
         if (!uidEl) {

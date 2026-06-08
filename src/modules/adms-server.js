@@ -90,6 +90,15 @@ function startAdmsServer(port = 80, mainWindow = null) {
             req.on('data', chunk => body += chunk.toString());
             req.on('end', () => {
                 console.log(`[ADMS] Command executed status from device: \n${body}`);
+                
+                if (body.includes('Return=0') && body.includes('CMD=ENROLL_FP')) {
+                    queueAdmsCommand('DATA QUERY BIODATA');
+                    queueAdmsCommand('DATA QUERY templatev10');
+                    if (mainWindow) {
+                        mainWindow.webContents.send('sync-progress', 'Fingerprint enrolled successfully. Fetching from device...');
+                    }
+                }
+                
                 res.writeHead(200, { 'Content-Type': 'text/plain' });
                 res.end('OK');
             });

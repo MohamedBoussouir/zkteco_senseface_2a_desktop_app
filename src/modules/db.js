@@ -11,7 +11,7 @@ const db = knex({
     useNullAsDefault: true,
 });
 
-async function initDb() {
+    async function initDb() {
     // Users Table
     const hasUsers = await db.schema.hasTable('users');
     if (!hasUsers) {
@@ -25,6 +25,8 @@ async function initDb() {
             table.text('fingerprints'); // JSON array
             table.integer('work_pattern_id').unsigned().references('id').inTable('work_patterns').onDelete('SET NULL');
             table.text('photo'); // Base64 image
+            table.string('password');
+            table.string('card_number');
             table.unique(['user_id', 'device_id']);
         });
     } else {
@@ -54,6 +56,20 @@ async function initDb() {
         if (!hasPhoto) {
             await db.schema.alterTable('users', (table) => {
                 table.text('photo');
+            });
+        }
+        // Self-healing: ensure password column exists
+        const hasPassword = await db.schema.hasColumn('users', 'password');
+        if (!hasPassword) {
+            await db.schema.alterTable('users', (table) => {
+                table.string('password');
+            });
+        }
+        // Self-healing: ensure card_number column exists
+        const hasCardNumber = await db.schema.hasColumn('users', 'card_number');
+        if (!hasCardNumber) {
+            await db.schema.alterTable('users', (table) => {
+                table.string('card_number');
             });
         }
     }

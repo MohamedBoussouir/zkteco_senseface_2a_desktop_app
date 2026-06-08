@@ -206,13 +206,16 @@ function setupIpcHandlers(mainWindow) {
         }
     });
 
-    ipcMain.handle('create-user', async (event, { ip, ports, uid, userId, name, role, work_pattern_id, user, deviceId }) => {
-        const userData = user || { uid, userId, name, role, work_pattern_id };
+    ipcMain.handle('create-user', async (event, { ip, ports, uid, userId, name, role, work_pattern_id, user, deviceId, password, card_number }) => {
+        const userData = user || { uid, userId, name, role, work_pattern_id, password, card_number };
         const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
         if (!device) return { success: false, error: 'Device not found' };
 
         // ADMS fields must be separated by tabs (\t), not spaces
-        queueAdmsCommand(`DATA UPDATE userinfo PIN=${userData.userId}\tName=${userData.name}\tPri=${userData.role || 0}`);
+        let admsCmd = `DATA UPDATE userinfo PIN=${userData.userId}\tName=${userData.name}\tPri=${userData.role || 0}`;
+        if (userData.password) admsCmd += `\tPassword=${userData.password}`;
+        if (userData.card_number) admsCmd += `\tCard=${userData.card_number}`;
+        queueAdmsCommand(admsCmd);
         
         await db('users').insert({
             uid: userData.uid,
@@ -221,22 +224,29 @@ function setupIpcHandlers(mainWindow) {
             role: userData.role || 0,
             device_id: device.id,
             fingerprints: '{"count": 0, "indices": []}',
-            work_pattern_id: userData.work_pattern_id || null
+            work_pattern_id: userData.work_pattern_id || null,
+            password: userData.password || '',
+            card_number: userData.card_number || ''
         }).onConflict(['user_id', 'device_id']).merge();
         
         return { success: true };
     });
 
-    ipcMain.handle('update-user', async (event, { ip, ports, uid, userId, name, role, work_pattern_id, deviceId }) => {
+    ipcMain.handle('update-user', async (event, { ip, ports, uid, userId, name, role, work_pattern_id, deviceId, password, card_number }) => {
         const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
         if (!device) return { success: false, error: 'Device not found' };
 
-        queueAdmsCommand(`DATA UPDATE userinfo PIN=${userId}\tName=${name}\tPri=${role || 0}`);
+        let admsCmd = `DATA UPDATE userinfo PIN=${userId}\tName=${name}\tPri=${role || 0}`;
+        if (password) admsCmd += `\tPassword=${password}`;
+        if (card_number) admsCmd += `\tCard=${card_number}`;
+        queueAdmsCommand(admsCmd);
         
         await db('users').where({ user_id: userId.toString(), device_id: device.id }).update({
             name: name,
             role: role || 0,
-            work_pattern_id: work_pattern_id || null
+            work_pattern_id: work_pattern_id || null,
+            password: password || '',
+            card_number: card_number || ''
         });
         
         return { success: true };
