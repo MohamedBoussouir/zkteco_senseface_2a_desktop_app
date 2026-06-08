@@ -250,7 +250,7 @@ function setupIpcHandlers(mainWindow) {
         queueAdmsCommand(`DATA DELETE user PIN=${userId}`);
         queueAdmsCommand(`DATA DELETE userinfo PIN=${userId}`);
         
-        await db('users').where({ uid, device_id: device.id }).delete();
+        await db('users').where({ user_id: userId.toString(), device_id: device.id }).delete();
         await db('attendance').where({ user_id: userId.toString(), device_id: device.id }).delete();
         
         return { success: true };
