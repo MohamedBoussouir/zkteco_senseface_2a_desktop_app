@@ -421,7 +421,11 @@ const app = {
 
     async loadUsers() {
         const users = await window.electronAPI.invoke('get-local-users');
-        this.usersData = users || [];
+        this.usersData = (users || []).sort((a, b) => {
+            const uidA = parseInt(a.uid) || 0;
+            const uidB = parseInt(b.uid) || 0;
+            return uidA - uidB;
+        });
         this.renderUsersTable();
     },
 
@@ -497,16 +501,15 @@ const app = {
             let fingersHtml = '';
             if (count > 0) {
                 fingersHtml = `
-                    <div class="inline-flex items-center bg-slate-800/40 rounded-xl p-1 border border-slate-700/50 shadow-inner whitespace-nowrap gap-1">
+                    <div style="display: inline-flex; align-items: center; background: rgba(30, 41, 59, 0.4); border-radius: 12px; padding: 4px; border: 1px solid rgba(51, 65, 85, 0.5); box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.06); white-space: nowrap; gap: 4px;">
                         ${(fpData && Array.isArray(fpData.indices) ? fpData.indices : (Array.isArray(fpData) ? fpData : [])).map(f => `
-                            <button class="cursor-pointer hover:scale-110 transition-transform bg-transparent border-none p-0 flex items-center outline-none text-sky-400" 
-                                onclick="app.deleteFingerDirectFlow(${u.uid}, '${u.user_id}', ${f}, '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices)))}')" 
-                                title="Delete Finger ${f}" style="font-size: 0.75rem; padding: 2px 4px;">
-                                <i class="fas fa-fingerprint"></i> <span class="ml-1">${f}</span>
+                            <button onclick="app.deleteFingerDirectFlow(${u.uid}, '${u.user_id}', ${f}, '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices)))}')" 
+                                title="Delete Finger ${f}" style="background: transparent; border: none; padding: 2px 4px; color: #38bdf8; display: flex; align-items: center; cursor: pointer; font-size: 0.75rem; outline: none; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">
+                                <i class="fas fa-fingerprint"></i> <span style="margin-left: 4px;">${f}</span>
                             </button>
                         `).join('')}
                         
-                        <div class="border-l border-slate-700/50 pl-1 ml-1 flex items-center">
+                        <div style="border-left: 1px solid rgba(51, 65, 85, 0.5); padding-left: 4px; margin-left: 4px; display: flex; align-items: center;">
                             <button class="btn btn-xs btn-red" onclick="app.deleteAllFingersFlow(${u.uid}, '${u.user_id}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices)))}')" title="Delete All Fingers" style="padding: 2px 4px;">
                                 <i class="fas fa-eraser"></i>
                             </button>
@@ -520,7 +523,7 @@ const app = {
             const passHtml = u.password ? `<div class="inline-flex items-center gap-1" style="background: rgba(250, 204, 21, 0.1); color: #facc15; border: 1px solid rgba(250, 204, 21, 0.2); padding: 4px 8px; border-radius: 8px; font-size: 0.8rem;" title="Password Enrolled"><i class="fas fa-key"></i></div>` : '';
             const cardHtml = u.card_number ? `<div class="inline-flex items-center gap-1" style="background: rgba(52, 211, 153, 0.1); color: #34d399; border: 1px solid rgba(52, 211, 153, 0.2); padding: 4px 8px; border-radius: 8px; font-size: 0.8rem;" title="Card Enrolled"><i class="fas fa-id-card"></i></div>` : '';
 
-            const noCredsHtml = (!count && !u.photo && !u.password && !u.card_number) ? `<span class="text-slate-600 italic text-xs">No credentials</span>` : '';
+            const noCredsHtml = (!count && !u.has_face && !u.password && !u.card_number) ? `<span style="color: rgba(255,255,255,0.3); font-style: italic; font-size: 0.8rem;">No credentials</span>` : '';
 
             return `
                 <tr class="hover:bg-slate-800/50">
@@ -672,7 +675,15 @@ const app = {
             const devices = JSON.parse(decodeURIComponent(atob(devicesEncoded)));
             const devId = await this.promptDeviceSelection('Select Device for Enrollment:', devices);
             if (devId) {
-                this.enrollFinger(uid, userId, devId);
+                const user = this.usersData.find(u => u.uid === uid);
+                let enrolledFingers = [];
+                if (user) {
+                    try {
+                        const fpData = JSON.parse(user.fingerprints || 'null');
+                        enrolledFingers = fpData && Array.isArray(fpData.indices) ? fpData.indices : (Array.isArray(fpData) ? fpData : []);
+                    } catch (e) {}
+                }
+                this.enrollFinger(uid, userId, devId, enrolledFingers);
             }
         } catch (e) {
             this.showNotification('Error enrolling finger: ' + e.message, 'error');
@@ -850,11 +861,26 @@ const app = {
         }
     },
 
-    enrollFinger(uid, userId, devId) {
+    enrollFinger(uid, userId, devId, enrolledFingers = []) {
         document.getElementById('enroll-modal').classList.add('active');
         document.querySelectorAll('.finger-btn').forEach(btn => {
+            const fingerIndex = parseInt(btn.dataset.idx);
+            
+            if (enrolledFingers.includes(fingerIndex)) {
+                btn.style.backgroundColor = 'rgba(56, 189, 248, 0.2)';
+                btn.style.color = '#38bdf8';
+                btn.style.borderColor = 'rgba(56, 189, 248, 0.4)';
+                btn.innerHTML = `F${fingerIndex} <i class="fas fa-check-circle" style="font-size: 0.7rem; margin-left: 4px;"></i>`;
+                btn.title = 'Already Enrolled. Click to Re-enroll.';
+            } else {
+                btn.style.backgroundColor = '';
+                btn.style.color = '';
+                btn.style.borderColor = '';
+                btn.innerHTML = `F${fingerIndex}`;
+                btn.title = '';
+            }
+
             btn.onclick = async () => {
-                const fingerIndex = parseInt(btn.dataset.idx);
                 document.getElementById('enroll-modal').classList.remove('active');
                 const dev = this.devices.find(d => d.id == devId);
                 if (dev) {
@@ -2417,14 +2443,10 @@ const app = {
             '#users-page .card:nth-child(2) .section-header h2': `<i class="fas fa-users"></i> ${trans.employee_directory}`,
             '#users-page .card:nth-child(2) .section-header button:nth-of-type(1)': `<i class="fas fa-download"></i> ${trans.btn_fetch_all}`,
             '#users-page .card:nth-child(2) .section-header button:nth-of-type(2)': `<i class="fas fa-fingerprint"></i> ${trans.btn_sync_bio}`,
-            '#users-table th:nth-child(1)': trans.col_name,
-            '#users-table th:nth-child(2)': 'Photo',
-            '#users-table th:nth-child(3)': trans.col_id,
-            '#users-table th:nth-child(4)': trans.col_device,
-            '#users-table th:nth-child(5)': trans.role,
-            '#users-table th:nth-child(6)': 'Work Pattern',
-            '#users-table th:nth-child(7)': trans.col_bio_status,
-            '#users-table th:nth-child(8)': trans.col_actions,
+            '#users-table th:nth-child(1)': trans.col_employee_info || 'Employee Info',
+            '#users-table th:nth-child(2)': trans.col_assignment || 'Assignment',
+            '#users-table th:nth-child(3)': trans.col_credentials || 'Credentials',
+            '#users-table th:nth-child(4)': trans.col_actions,
             
             // Schedules
             '.schedules-tabs button[data-tab="tab-define-shifts"]': `<i class="fas fa-clock" style="color: #818cf8;"></i> ${trans.tab_define_shifts}`,

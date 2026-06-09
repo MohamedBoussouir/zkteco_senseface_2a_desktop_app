@@ -232,13 +232,14 @@ async function processAdmsData(table, data, sn, mainWindow) {
                 let contentMatch = line.match(/Content=(.*)/i) || line.match(/TMP=(.*)/i);
                 let content = contentMatch ? contentMatch[1].trim() : null;
 
-                if (userId && content && (type === 9 || line.startsWith('USERPIC'))) {
+                let isUserPic = line.startsWith('USERPIC');
+                if (userId && content && isUserPic) {
                     try {
                         await db('users').where({ user_id: userId }).update({
                             photo: content,
                             last_sync_time: Date.now()
                         });
-                        console.log(`[ADMS] Saved BioPhoto/UserPic for User ${userId} (from OPERLOG)`);
+                        console.log(`[ADMS] Saved UserPic for User ${userId} (from OPERLOG)`);
                         
                         if (global.syncSessions && global.syncSessions[device.id]) {
                             global.syncSessions[device.id].photos.add(userId);
@@ -403,22 +404,24 @@ async function processAdmsData(table, data, sn, mainWindow) {
             let typeMatch = line.match(/\bType=([^\t\s]+)/i);
             let type = typeMatch ? parseInt(typeMatch[1]) : 9;
             
+            let isUserPic = table === 'USERPIC' || line.startsWith('USERPIC');
+            
             // Extract the base64 content
             let contentMatch = line.match(/Content=(.*)/i) || line.match(/TMP=(.*)/i);
             let content = contentMatch ? contentMatch[1].trim() : null;
 
-            if (userId && content && (type === 9 || table === 'USERPIC' || line.startsWith('USERPIC'))) {
+            if (userId && content && isUserPic) {
                 try {
                     await db('users').where({ user_id: userId }).update({
                         photo: content,
                         last_sync_time: Date.now()
                     });
-                    console.log(`[ADMS] Saved BioPhoto for User ${userId}`);
+                    console.log(`[ADMS] Saved UserPic for User ${userId}`);
                     
                     if (global.syncSessions && global.syncSessions[device.id]) {
                         global.syncSessions[device.id].photos.add(userId);
                     }
-                } catch(e) { console.error('[ADMS] Error saving BioPhoto:', e); }
+                } catch(e) { console.error('[ADMS] Error saving UserPic:', e); }
             }
         }
         if (mainWindow) mainWindow.webContents.send('sync-progress', 'Photos synced via ADMS');
