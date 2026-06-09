@@ -293,6 +293,32 @@ tr:hover td { background: var(--glass-bg); }
 
 .btn-red:hover { background: #ef4444; color: white; }
 
+.btn-blue {
+    background: rgba(56, 189, 248, 0.15);
+    color: #38bdf8;
+}
+.btn-blue:hover { background: #38bdf8; color: white; }
+
+.btn-purple {
+    background: rgba(168, 85, 247, 0.15);
+    color: #a855f7;
+}
+.btn-purple:hover { background: #a855f7; color: white; }
+
+.btn-yellow {
+    background: rgba(250, 204, 21, 0.15);
+    color: #facc15;
+}
+.btn-yellow:hover { background: #facc15; color: black; }
+
+.btn-icon {
+    padding: 8px;
+    width: 32px;
+    height: 32px;
+    justify-content: center;
+    border-radius: 8px;
+}
+
 .btn-full { width: 100%; justify-content: center; }
 
 /* Inputs */

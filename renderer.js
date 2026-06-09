@@ -500,22 +500,7 @@ const app = {
 
             let fingersHtml = '';
             if (count > 0) {
-                fingersHtml = `
-                    <div style="display: inline-flex; align-items: center; background: rgba(30, 41, 59, 0.4); border-radius: 12px; padding: 4px; border: 1px solid rgba(51, 65, 85, 0.5); box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.06); white-space: nowrap; gap: 4px;">
-                        ${(fpData && Array.isArray(fpData.indices) ? fpData.indices : (Array.isArray(fpData) ? fpData : [])).map(f => `
-                            <button onclick="app.deleteFingerDirectFlow(${u.uid}, '${u.user_id}', ${f}, '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices)))}')" 
-                                title="Delete Finger ${f}" style="background: transparent; border: none; padding: 2px 4px; color: #38bdf8; display: flex; align-items: center; cursor: pointer; font-size: 0.75rem; outline: none; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">
-                                <i class="fas fa-fingerprint"></i> <span style="margin-left: 4px;">${f}</span>
-                            </button>
-                        `).join('')}
-                        
-                        <div style="border-left: 1px solid rgba(51, 65, 85, 0.5); padding-left: 4px; margin-left: 4px; display: flex; align-items: center;">
-                            <button class="btn btn-xs btn-red" onclick="app.deleteAllFingersFlow(${u.uid}, '${u.user_id}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices)))}')" title="Delete All Fingers" style="padding: 2px 4px;">
-                                <i class="fas fa-eraser"></i>
-                            </button>
-                        </div>
-                    </div>
-                `;
+                fingersHtml = `<div class="inline-flex items-center gap-1" style="background: rgba(56, 189, 248, 0.1); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.2); padding: 4px 8px; border-radius: 8px; font-size: 0.8rem;" title="${count} Fingerprints Enrolled"><i class="fas fa-fingerprint"></i> ${count}</div>`;
             }
 
             // Other credentials
@@ -558,8 +543,8 @@ const app = {
                         </div>
                     </td>
                     <td class="p-3 border-b border-slate-700">
-                        <div class="actions-cell" style="justify-content: flex-start;">
-                            <button class="btn btn-icon btn-blue" onclick="app.enrollFingerFlow(${u.uid}, '${u.user_id}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices || [])))}')" title="Enroll Finger">
+                        <div class="actions-cell" style="display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-start;">
+                            <button class="btn btn-icon btn-blue" onclick="app.enrollFingerFlow(${u.uid}, '${u.user_id}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices || [])))}')" title="Manage Fingerprints">
                                 <i class="fas fa-fingerprint"></i>
                             </button>
                             <button class="btn btn-icon btn-purple" onclick="app.openWebcamModal('${u.user_id}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices || [])))}')" title="Take Profile/Face Photo">
@@ -575,7 +560,7 @@ const app = {
                                 <i class="fas fa-user-astronaut"></i>
                             </button>
                             ` : ''}
-                            <button class="btn btn-icon" style="background: rgba(250, 204, 21, 0.2); color: #facc15;" onclick="app.credentialsFlow(${u.uid}, '${u.user_id}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices || [])))}', '${(u.password || '').replace(/'/g, "\\'")}', '${(u.card_number || '').replace(/'/g, "\\'")}')" title="Manage Password & Card">
+                            <button class="btn btn-icon btn-yellow" onclick="app.credentialsFlow(${u.uid}, '${u.user_id}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices || [])))}', '${(u.password || '').replace(/'/g, "\\'")}', '${(u.card_number || '').replace(/'/g, "\\'")}')" title="Manage Password & Card">
                                 <i class="fas fa-key"></i>
                             </button>
                             <button class="btn btn-icon btn-blue" onclick="app.editUserFlow(${u.uid}, '${u.user_id}', '${(u.name || '').replace(/'/g, "\\'")}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices || [])))}', ${u.work_pattern_id || 'null'}, '${(u.password || '').replace(/'/g, "\\'")}', '${(u.card_number || '').replace(/'/g, "\\'")}')" title="Edit User">
@@ -863,6 +848,19 @@ const app = {
 
     enrollFinger(uid, userId, devId, enrolledFingers = []) {
         document.getElementById('enroll-modal').classList.add('active');
+        
+        // Setup Delete All Button
+        const deleteAllBtn = document.getElementById('delete-all-fingers-btn');
+        if (enrolledFingers.length > 0) {
+            deleteAllBtn.style.display = 'block';
+            deleteAllBtn.onclick = () => {
+                document.getElementById('enroll-modal').classList.remove('active');
+                app.deleteAllFingers(uid, userId, devId);
+            };
+        } else {
+            deleteAllBtn.style.display = 'none';
+        }
+
         document.querySelectorAll('.finger-btn').forEach(btn => {
             const fingerIndex = parseInt(btn.dataset.idx);
             
@@ -871,21 +869,28 @@ const app = {
                 btn.style.color = '#38bdf8';
                 btn.style.borderColor = 'rgba(56, 189, 248, 0.4)';
                 btn.innerHTML = `F${fingerIndex} <i class="fas fa-check-circle" style="font-size: 0.7rem; margin-left: 4px;"></i>`;
-                btn.title = 'Already Enrolled. Click to Re-enroll.';
+                btn.title = 'Already Enrolled. Click to Delete.';
             } else {
                 btn.style.backgroundColor = '';
                 btn.style.color = '';
                 btn.style.borderColor = '';
                 btn.innerHTML = `F${fingerIndex}`;
-                btn.title = '';
+                btn.title = 'Click to Enroll';
             }
 
             btn.onclick = async () => {
                 document.getElementById('enroll-modal').classList.remove('active');
-                const dev = this.devices.find(d => d.id == devId);
-                if (dev) {
-                    this.showNotification('Follow instructions on device sensor...', 'info');
-                    await window.electronAPI.invoke('enroll-fingerprint', { ip: dev.ip, ports: [dev.port1, dev.port2], uid, userId, fingerIndex, deviceId: dev.id });
+                
+                if (enrolledFingers.includes(fingerIndex)) {
+                    // Finger is already enrolled -> ask to delete it
+                    app.deleteFingerDirect(uid, userId, devId, fingerIndex);
+                } else {
+                    // Finger not enrolled -> enroll it
+                    const dev = this.devices.find(d => d.id == devId);
+                    if (dev) {
+                        this.showNotification('Follow instructions on device sensor...', 'info');
+                        await window.electronAPI.invoke('enroll-fingerprint', { ip: dev.ip, ports: [dev.port1, dev.port2], uid, userId, fingerIndex, deviceId: dev.id });
+                    }
                 }
             };
         });
