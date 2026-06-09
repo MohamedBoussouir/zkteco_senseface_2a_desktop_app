@@ -79,6 +79,9 @@ function setupIpcHandlers(mainWindow) {
                 db.raw('MAX(users.name) as name'),
                 db.raw('MAX(users.role) as role'),
                 db.raw('MAX(users.photo) as photo'),
+                db.raw('MAX(users.password) as password'),
+                db.raw('MAX(users.card_number) as card_number'),
+                db.raw('MAX(users.has_face) as has_face'),
                 db.raw('MAX(users.work_pattern_id) as work_pattern_id'),
                 db.raw('MAX(work_patterns.name) as pattern_name'),
                 db.raw("GROUP_CONCAT(users.fingerprints, '|||') as all_fingerprints"),
@@ -139,6 +142,8 @@ function setupIpcHandlers(mainWindow) {
             queueAdmsCommand('DATA QUERY userinfo');
             queueAdmsCommand('DATA QUERY templatev10');
             queueAdmsCommand('DATA QUERY BIODATA');
+            queueAdmsCommand('DATA QUERY BIOPHOTO');
+            queueAdmsCommand('DATA QUERY USERPIC');
             return { success: true, count: 0, message: 'Sync commands queued via ADMS' };
         } catch (e) {
             return { success: false, error: e.message };
@@ -213,8 +218,8 @@ function setupIpcHandlers(mainWindow) {
 
         // ADMS fields must be separated by tabs (\t), not spaces
         let admsCmd = `DATA UPDATE userinfo PIN=${userData.userId}\tName=${userData.name}\tPri=${userData.role || 0}`;
-        if (userData.password) admsCmd += `\tPassword=${userData.password}`;
-        if (userData.card_number) admsCmd += `\tCard=${userData.card_number}`;
+        admsCmd += `\tPasswd=${userData.password || ''}`;
+        admsCmd += `\tCard=${userData.card_number || ''}`;
         queueAdmsCommand(admsCmd);
         
         await db('users').insert({
@@ -237,8 +242,8 @@ function setupIpcHandlers(mainWindow) {
         if (!device) return { success: false, error: 'Device not found' };
 
         let admsCmd = `DATA UPDATE userinfo PIN=${userId}\tName=${name}\tPri=${role || 0}`;
-        if (password) admsCmd += `\tPassword=${password}`;
-        if (card_number) admsCmd += `\tCard=${card_number}`;
+        admsCmd += `\tPasswd=${password || ''}`;
+        admsCmd += `\tCard=${card_number || ''}`;
         queueAdmsCommand(admsCmd);
         
         await db('users').where({ user_id: userId.toString(), device_id: device.id }).update({
@@ -264,6 +269,23 @@ function setupIpcHandlers(mainWindow) {
         await db('attendance').where({ user_id: userId.toString(), device_id: device.id }).delete();
         
         return { success: true };
+    });
+
+    ipcMain.handle('delete-user-pic', async (event, { ip, deviceId, userId }) => {
+        const { queueAdmsCommand } = require('./adms-server');
+        // Delete locally
+        await db('users').where('user_id', userId).update({ photo: null });
+
+        if (!ip && !deviceId) {
+            return { success: true }; // Only local deletion needed
+        }
+
+        const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
+        if (device && device.sn) {
+            queueAdmsCommand(`DATA DELETE USERPIC PIN=${userId}`);
+            return { success: true };
+        }
+        return { success: false, error: 'Device not found' };
     });
 
     ipcMain.handle('delete-user-finger', async (event, { ip, ports, uid, userId, fingerIndex, deviceId }) => {
@@ -293,25 +315,35 @@ function setupIpcHandlers(mainWindow) {
         queueAdmsCommand(`DATA DELETE BIOPHOTO PIN=${userId}`);
         queueAdmsCommand(`DATA DELETE BIODATA Pin=${userId}\tType=9`);
 
-        // Remove the photo from the database
-        await db('users').where({ user_id: userId, device_id: device.id }).update({ photo: null });
+        // Update database to mark face as deleted, but keep the profile photo
+        await db('users').where({ user_id: userId, device_id: device.id }).update({ has_face: false });
 
         return { success: true };
     });
 
-    ipcMain.handle('upload-face-photo', async (event, { ip, deviceId, userId, photoBase64 }) => {
+    ipcMain.handle('upload-face-photo', async (event, { ip, deviceId, userId, photoBase64, uploadAsProfile, uploadAsFace }) => {
         const { queueAdmsCommand } = require('./adms-server');
         const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
         if (device && device.sn) {
             // Calculate raw binary size from base64 string
             const binarySize = Buffer.from(photoBase64, 'base64').length;
-            // Type 9 is Face in BIOPHOTO
-            queueAdmsCommand(`DATA UPDATE BIOPHOTO PIN=${userId}\tType=9\tSize=${binarySize}\tContent=${photoBase64}`);
-            // Also update USERPIC so it displays on the screen
-            queueAdmsCommand(`DATA UPDATE USERPIC PIN=${userId}\tSize=${binarySize}\tContent=${photoBase64}`);
             
-            // Save photo to local database
-            await db('users').where('user_id', userId).update({ photo: photoBase64 });
+            let updates = {};
+
+            if (uploadAsFace) {
+                // Type 9 is Face in BIOPHOTO
+                queueAdmsCommand(`DATA UPDATE BIOPHOTO PIN=${userId}\tType=9\tSize=${binarySize}\tContent=${photoBase64}`);
+                updates.has_face = true;
+            }
+            if (uploadAsProfile) {
+                // Also update USERPIC so it displays on the screen
+                queueAdmsCommand(`DATA UPDATE USERPIC PIN=${userId}\tSize=${binarySize}\tContent=${photoBase64}`);
+                updates.photo = photoBase64;
+            }
+            
+            if (Object.keys(updates).length > 0) {
+                await db('users').where('user_id', userId).update(updates);
+            }
             
             return { success: true };
         }
@@ -322,29 +354,79 @@ function setupIpcHandlers(mainWindow) {
         const device = deviceId ? await db('devices').where('id', deviceId).first() : await db('devices').where('ip', ip).first();
         if (!device) return { success: false, error: 'Device not found' };
         
-        // Reset last_sync_time for all users on this device to detect deletions
+        // Start tracking biometric data for Smart Diffing
+        global.syncSessions = global.syncSessions || {};
+        global.syncSessions[device.id] = { faces: new Set(), fingers: new Map(), photos: new Set() };
+
+        // Expose cleanup functions for adms-server.js to call when the device confirms completion
+        global.executeUserCleanup = async (devId) => {
+            try {
+                const deletedCount = await db('users')
+                    .where('device_id', devId)
+                    .where('last_sync_time', 0)
+                    .delete();
+                if (deletedCount > 0) {
+                    console.log(`[ADMS Sync] Auto-deleted ${deletedCount} missing users.`);
+                }
+            } catch(e) { console.error('User Cleanup Error:', e); }
+        };
+
+        global.executeSmartCleanup = async (devId) => {
+            const session = global.syncSessions[devId];
+            if (!session) return;
+
+            try {
+                const activeUsers = await db('users').where('device_id', devId);
+                let diffChanges = 0;
+                for (const u of activeUsers) {
+                    let updates = {};
+                    
+                    if (u.has_face && !session.faces.has(u.user_id)) {
+                        updates.has_face = false;
+                    }
+                    
+                    if (u.photo && !session.photos.has(u.user_id)) {
+                        updates.photo = null;
+                    }
+                    
+                    const incomingFingers = session.fingers.get(u.user_id) || new Set();
+                    let oldIndices = [];
+                    try { oldIndices = JSON.parse(u.fingerprints || '{}').indices || []; } catch(e){}
+                    if (oldIndices.length > 0 && incomingFingers.size !== oldIndices.length) {
+                            updates.fingerprints = JSON.stringify({ count: incomingFingers.size, indices: Array.from(incomingFingers) });
+                    }
+
+                    if (Object.keys(updates).length > 0) {
+                        await db('users').where('id', u.id).update(updates);
+                        diffChanges++;
+                    }
+                }
+                
+                if (diffChanges > 0) {
+                    console.log(`[ADMS Sync] Smart Diff cleaned up stale biometrics for ${diffChanges} users.`);
+                }
+                const { mainWindow } = require('../../main');
+                if (mainWindow) mainWindow.webContents.send('sync-progress', 'Smart Sync Complete');
+
+            } catch (e) { 
+                console.error('Smart Cleanup error:', e); 
+            } finally {
+                delete global.syncSessions[devId];
+            }
+        };
+
+        // Reset last_sync_time to detect completely deleted users
         await db('users').where('device_id', device.id).update({ last_sync_time: 0 });
+
+        // Safety Memory Cleanup
+        setTimeout(() => { delete global.syncSessions[device.id]; }, 60000);
 
         // Queue commands to force the device to push all users and fingerprints via ADMS
         queueAdmsCommand('DATA QUERY userinfo');
         queueAdmsCommand('DATA QUERY templatev10');
         queueAdmsCommand('DATA QUERY BIODATA');
         queueAdmsCommand('DATA QUERY BIOPHOTO');
-        
-        // Start a timeout to delete users that weren't pushed
-        setTimeout(async () => {
-            try {
-                // Anyone still at 0 after 20 seconds was deleted from the device!
-                const deletedCount = await db('users')
-                    .where('device_id', device.id)
-                    .where('last_sync_time', 0)
-                    .delete();
-                if (deletedCount > 0) {
-                    console.log(`[ADMS Sync Cleanup] Auto-deleted ${deletedCount} users from local DB because they are missing from device.`);
-                    // Optionally notify frontend here if possible
-                }
-            } catch (e) { console.error('Cleanup error:', e); }
-        }, 20000); // 20 seconds should be enough for the device to push all chunks
+        queueAdmsCommand('DATA QUERY USERPIC');
 
         const res = await db('users').where('device_id', device.id).count('id as c');
         const count = res[0].c || 0;
@@ -543,7 +625,22 @@ function setupIpcHandlers(mainWindow) {
     });
 
     ipcMain.handle('set-custom-time', async (event, dateTimeStr) => {
-        return [{ ip: 'All Devices', success: false, error: 'Not supported via ADMS' }];
+        try {
+            const chosenDate = new Date(dateTimeStr);
+            const unixTime = Math.floor(chosenDate.getTime() / 1000);
+            
+            // Format YYYY-MM-DD HH:mm:ss for CONTROL DEVICE SET TIME
+            const formattedTime = `${chosenDate.getFullYear()}-${(chosenDate.getMonth()+1).toString().padStart(2,'0')}-${chosenDate.getDate().toString().padStart(2,'0')} ${chosenDate.getHours().toString().padStart(2,'0')}:${chosenDate.getMinutes().toString().padStart(2,'0')}:00`;
+
+            // Queue commands for all devices. We use both formats to maximize compatibility across different ZKTeco firmwares
+            queueAdmsCommand(`SET OPTIONS DateTime=${unixTime},S`);
+            queueAdmsCommand(`CONTROL DEVICE SET TIME ${formattedTime}`);
+            
+            return [{ ip: 'All Devices', success: true }];
+        } catch (e) {
+            console.error('Error setting custom time:', e);
+            return [{ ip: 'All Devices', success: false, error: 'Failed to process time' }];
+        }
     });
 
     ipcMain.handle('get-late-report', async (event, { date, startTime, endTime, mode, month, year, startDateParam, endDateParam }) => {

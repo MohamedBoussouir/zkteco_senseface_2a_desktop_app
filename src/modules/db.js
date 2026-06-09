@@ -37,6 +37,13 @@ const db = knex({
                 table.text('fingerprints');
             });
         }
+        // Self-healing: ensure has_face column exists
+        const hasFace = await db.schema.hasColumn('users', 'has_face');
+        if (!hasFace) {
+            await db.schema.alterTable('users', (table) => {
+                table.boolean('has_face').defaultTo(false);
+            });
+        }
         // Self-healing: ensure work_pattern_id column exists
         const hasWorkPatternId = await db.schema.hasColumn('users', 'work_pattern_id');
         if (!hasWorkPatternId) {

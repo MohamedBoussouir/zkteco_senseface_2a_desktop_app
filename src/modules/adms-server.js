@@ -5,6 +5,7 @@ const { db } = require('./db');
 let server = null;
 let pendingCommands = [];
 let cmdIdCounter = 200;
+const cmdHistory = new Map();
 let discoveredDevices = new Set();
 
 function getDiscoveredDevices() {
@@ -15,7 +16,7 @@ function clearDiscoveredDevices() {
     discoveredDevices.clear();
 }
 
-async function handleDeviceSeen(sn, mainWindow) {
+async function handleDeviceSeen(sn, mainWindow, req = null) {
     if (!sn) return;
     try {
         let dev = await db('devices').where('sn', sn).first();
@@ -74,6 +75,7 @@ function startAdmsServer(port = 80, mainWindow = null) {
             if (pendingCommands.length > 0) {
                 const cmdString = pendingCommands.map(cmd => {
                     cmdIdCounter++;
+                    cmdHistory.set(cmdIdCounter.toString(), cmd);
                     return `C:${cmdIdCounter}:${cmd}`;
                 }).join('\n');
                 console.log(`[ADMS] Sending commands to device:\n${cmdString}`);
@@ -88,8 +90,31 @@ function startAdmsServer(port = 80, mainWindow = null) {
             await handleDeviceSeen(query.SN, mainWindow);
             let body = '';
             req.on('data', chunk => body += chunk.toString());
-            req.on('end', () => {
+            req.on('end', async () => {
                 console.log(`[ADMS] Command executed status from device: \n${body}`);
+                
+                const lines = body.split('\n');
+                for (const line of lines) {
+                    const matchId = line.match(/ID=(\d+)/);
+                    if (matchId && line.includes('Return=0')) {
+                        const id = matchId[1];
+                        const originalCmd = cmdHistory.get(id);
+                        if (originalCmd) {
+                            console.log(`[ADMS] Exact Command Completed: ${originalCmd}`);
+                            try {
+                                const dev = await db('devices').where('sn', query.SN).first();
+                                if (dev) {
+                                    if (originalCmd.includes('DATA QUERY BIODATA') && global.executeSmartCleanup) {
+                                        await global.executeSmartCleanup(dev.id);
+                                    } else if (originalCmd.includes('DATA QUERY userinfo') && global.executeUserCleanup) {
+                                        await global.executeUserCleanup(dev.id);
+                                    }
+                                }
+                            } catch(e) {}
+                            cmdHistory.delete(id);
+                        }
+                    }
+                }
                 
                 if (body.includes('Return=0') && body.includes('CMD=ENROLL_FP')) {
                     queueAdmsCommand('DATA QUERY BIODATA');
@@ -102,6 +127,16 @@ function startAdmsServer(port = 80, mainWindow = null) {
                 res.writeHead(200, { 'Content-Type': 'text/plain' });
                 res.end('OK');
             });
+        } else if (pathname === '/testcmd') {
+            const cmd = query.cmd;
+            if (cmd) {
+                queueAdmsCommand(cmd);
+                res.writeHead(200, { 'Content-Type': 'text/plain' });
+                res.end('Command queued successfully: ' + cmd);
+            } else {
+                res.writeHead(400, { 'Content-Type': 'text/plain' });
+                res.end('Error: Missing cmd parameter');
+            }
         } else {
             res.writeHead(404, { 'Content-Type': 'text/plain' });
             res.end('Not Found');
@@ -204,6 +239,10 @@ async function processAdmsData(table, data, sn, mainWindow) {
                             last_sync_time: Date.now()
                         });
                         console.log(`[ADMS] Saved BioPhoto/UserPic for User ${userId} (from OPERLOG)`);
+                        
+                        if (global.syncSessions && global.syncSessions[device.id]) {
+                            global.syncSessions[device.id].photos.add(userId);
+                        }
                     } catch(e) {}
                 }
                 continue;
@@ -245,9 +284,13 @@ async function processAdmsData(table, data, sn, mainWindow) {
             let name = nameMatch ? nameMatch[1].trim() : 'Unknown';
             let roleMatch = line.match(/\bPri=([^\t\s]+)/i);
             let role = roleMatch ? parseInt(roleMatch[1]) : 0;
+            let passMatch = line.match(/\bPassword=([^\t\s]+)/i) || line.match(/\bPasswd=([^\t\s]+)/i);
+            let password = passMatch ? passMatch[1].trim() : '';
+            let cardMatch = line.match(/\bCard=([^\t\s]+)/i);
+            let card = cardMatch ? cardMatch[1].trim() : '';
 
             if (userId) {
-                console.log(`[DEBUG USER PARSE] line: "${line}" -> userId: ${userId}, name: ${name}`);
+                console.log(`[DEBUG USER PARSE] line: "${line}" -> userId: ${userId}, name: ${name}, pass: ${password}, card: ${card}`);
                 try {
                     let updateData = {
                         role: role,
@@ -256,6 +299,8 @@ async function processAdmsData(table, data, sn, mainWindow) {
                     if (name !== 'Unknown') {
                         updateData.name = name;
                     }
+                    updateData.password = password;
+                    updateData.card_number = (card === '0') ? '' : card;
 
                     await db('users').insert({
                         uid: parseInt(userId),
@@ -283,7 +328,7 @@ async function processAdmsData(table, data, sn, mainWindow) {
             let typeMatch = line.match(/\bType=([^\t\s]+)/i);
             let type = typeMatch ? parseInt(typeMatch[1]) : 1;
 
-            if (userId && type === 1) {
+            if (userId && (type === 1 || type === 8 || type === 9)) {
                 try {
                     let u = await db('users').where({ user_id: userId, device_id: device.id }).first();
                     
@@ -295,7 +340,8 @@ async function processAdmsData(table, data, sn, mainWindow) {
                                 name: `User ${userId}`,
                                 role: 0,
                                 device_id: device.id,
-                                fingerprints: '{"count": 0, "indices": []}'
+                                fingerprints: '{"count": 0, "indices": []}',
+                                has_face: false
                             });
                             u = await db('users').where({ user_id: userId, device_id: device.id }).first();
                             console.log(`[ADMS] Auto-created User ${userId} from BIODATA`);
@@ -303,24 +349,44 @@ async function processAdmsData(table, data, sn, mainWindow) {
                     }
 
                     if (u) {
-                        let fpData = { count: 0, indices: [] };
-                        try { 
-                            let parsed = JSON.parse(u.fingerprints || '{"count":0, "indices":[]}'); 
-                            if (Array.isArray(parsed)) {
-                                fpData = { count: parsed.length, indices: parsed };
-                            } else if (parsed && Array.isArray(parsed.indices)) {
-                                fpData = parsed;
+                        if (type === 8 || type === 9) {
+                            if (global.syncSessions && global.syncSessions[device.id]) {
+                                global.syncSessions[device.id].faces.add(userId);
                             }
-                        } catch(e){}
-                        
-                        if (!fpData.indices.includes(fingerId)) {
-                            fpData.indices.push(fingerId);
-                            fpData.count = fpData.indices.length;
-                            await db('users').where('id', u.id).update({
-                                fingerprints: JSON.stringify(fpData),
-                                last_sync_time: Date.now()
-                            });
-                            console.log(`[ADMS] Updated BioData for User ${userId}, FID: ${fingerId}`);
+                            if (!u.has_face) {
+                                await db('users').where('id', u.id).update({
+                                    has_face: true,
+                                    last_sync_time: Date.now()
+                                });
+                                console.log(`[ADMS] Updated BioData (Face) for User ${userId}`);
+                            }
+                        } else if (type === 1) {
+                            if (global.syncSessions && global.syncSessions[device.id]) {
+                                if (!global.syncSessions[device.id].fingers.has(userId)) {
+                                    global.syncSessions[device.id].fingers.set(userId, new Set());
+                                }
+                                global.syncSessions[device.id].fingers.get(userId).add(fingerId);
+                            }
+
+                            let fpData = { count: 0, indices: [] };
+                            try { 
+                                let parsed = JSON.parse(u.fingerprints || '{"count":0, "indices":[]}'); 
+                                if (Array.isArray(parsed)) {
+                                    fpData = { count: parsed.length, indices: parsed };
+                                } else if (parsed && Array.isArray(parsed.indices)) {
+                                    fpData = parsed;
+                                }
+                            } catch(e){}
+                            
+                            if (!fpData.indices.includes(fingerId)) {
+                                fpData.indices.push(fingerId);
+                                fpData.count = fpData.indices.length;
+                                await db('users').where('id', u.id).update({
+                                    fingerprints: JSON.stringify(fpData),
+                                    last_sync_time: Date.now()
+                                });
+                                console.log(`[ADMS] Updated BioData (Fingerprint) for User ${userId}, FID: ${fingerId}`);
+                            }
                         } else {
                             await db('users').where('id', u.id).update({ last_sync_time: Date.now() });
                         }
@@ -330,7 +396,7 @@ async function processAdmsData(table, data, sn, mainWindow) {
         }
         if (mainWindow) mainWindow.webContents.send('sync-progress', 'BioData synced via ADMS');
     }
-    else if (table === 'BIOPHOTO') {
+    else if (table === 'BIOPHOTO' || table === 'USERPIC') {
         for (const line of lines) {
             let userIdMatch = line.match(/\bPIN=([^\t\s]+)/i) || line.match(/\bPin=([^\t\s]+)/i);
             let userId = userIdMatch ? userIdMatch[1].trim() : null;
@@ -341,13 +407,17 @@ async function processAdmsData(table, data, sn, mainWindow) {
             let contentMatch = line.match(/Content=(.*)/i) || line.match(/TMP=(.*)/i);
             let content = contentMatch ? contentMatch[1].trim() : null;
 
-            if (userId && content && type === 9) {
+            if (userId && content && (type === 9 || table === 'USERPIC' || line.startsWith('USERPIC'))) {
                 try {
                     await db('users').where({ user_id: userId }).update({
                         photo: content,
                         last_sync_time: Date.now()
                     });
                     console.log(`[ADMS] Saved BioPhoto for User ${userId}`);
+                    
+                    if (global.syncSessions && global.syncSessions[device.id]) {
+                        global.syncSessions[device.id].photos.add(userId);
+                    }
                 } catch(e) { console.error('[ADMS] Error saving BioPhoto:', e); }
             }
         }

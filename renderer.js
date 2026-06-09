@@ -516,7 +516,7 @@ const app = {
             }
 
             // Other credentials
-            const faceHtml = u.photo ? `<div class="inline-flex items-center gap-1" style="background: rgba(168, 85, 247, 0.1); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.2); padding: 4px 8px; border-radius: 8px; font-size: 0.8rem;" title="Face Enrolled"><i class="fas fa-camera"></i></div>` : '';
+            const faceHtml = u.has_face ? `<div class="inline-flex items-center gap-1" style="background: rgba(168, 85, 247, 0.1); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.2); padding: 4px 8px; border-radius: 8px; font-size: 0.8rem;" title="Face Enrolled"><i class="fas fa-user-circle"></i></div>` : '';
             const passHtml = u.password ? `<div class="inline-flex items-center gap-1" style="background: rgba(250, 204, 21, 0.1); color: #facc15; border: 1px solid rgba(250, 204, 21, 0.2); padding: 4px 8px; border-radius: 8px; font-size: 0.8rem;" title="Password Enrolled"><i class="fas fa-key"></i></div>` : '';
             const cardHtml = u.card_number ? `<div class="inline-flex items-center gap-1" style="background: rgba(52, 211, 153, 0.1); color: #34d399; border: 1px solid rgba(52, 211, 153, 0.2); padding: 4px 8px; border-radius: 8px; font-size: 0.8rem;" title="Card Enrolled"><i class="fas fa-id-card"></i></div>` : '';
 
@@ -559,13 +559,23 @@ const app = {
                             <button class="btn btn-icon btn-blue" onclick="app.enrollFingerFlow(${u.uid}, '${u.user_id}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices || [])))}')" title="Enroll Finger">
                                 <i class="fas fa-fingerprint"></i>
                             </button>
-                            <button class="btn btn-icon btn-purple" onclick="app.openWebcamModal('${u.user_id}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices || [])))}')" title="Take Face Photo">
+                            <button class="btn btn-icon btn-purple" onclick="app.openWebcamModal('${u.user_id}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices || [])))}')" title="Take Profile/Face Photo">
                                 <i class="fas fa-camera"></i>
                             </button>
-                            <button class="btn btn-icon btn-red" onclick="app.deleteFaceFlow(${u.uid}, '${u.user_id}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices || [])))}')" title="Delete Face">
+                            ${u.photo ? `
+                            <button class="btn btn-icon btn-red" onclick="app.deleteUserPicFlow(${u.uid}, '${u.user_id}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices || [])))}')" title="Delete Profile Photo">
+                                <i class="fas fa-image"></i>
+                            </button>
+                            ` : ''}
+                            ${u.has_face ? `
+                            <button class="btn btn-icon btn-red" onclick="app.deleteFaceFlow(${u.uid}, '${u.user_id}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices || [])))}')" title="Delete Face Biometric">
                                 <i class="fas fa-user-astronaut"></i>
                             </button>
-                            <button class="btn btn-icon btn-blue" onclick="app.editUserFlow(${u.uid}, '${u.user_id}', '${(u.name || '').replace(/'/g, "\\'")}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices || [])))}', ${u.work_pattern_id || 'null'}, '${(u.password || '').replace(/'/g, "\\'")}', '${(u.card_number || '').replace(/'/g, "\\'")}')" title="Edit User & Set Credentials">
+                            ` : ''}
+                            <button class="btn btn-icon" style="background: rgba(250, 204, 21, 0.2); color: #facc15;" onclick="app.credentialsFlow(${u.uid}, '${u.user_id}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices || [])))}', '${(u.password || '').replace(/'/g, "\\'")}', '${(u.card_number || '').replace(/'/g, "\\'")}')" title="Manage Password & Card">
+                                <i class="fas fa-key"></i>
+                            </button>
+                            <button class="btn btn-icon btn-blue" onclick="app.editUserFlow(${u.uid}, '${u.user_id}', '${(u.name || '').replace(/'/g, "\\'")}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices || [])))}', ${u.work_pattern_id || 'null'}, '${(u.password || '').replace(/'/g, "\\'")}', '${(u.card_number || '').replace(/'/g, "\\'")}')" title="Edit User">
                                 <i class="fas fa-edit"></i>
                             </button>
                             <button class="btn btn-icon btn-red" onclick="app.deleteUserFlow(${u.uid}, '${u.user_id}', '${btoa(encodeURIComponent(JSON.stringify(u.assigned_devices || [])))}')" title="Delete User">
@@ -692,6 +702,70 @@ const app = {
             this.showNotification('Error editing user: ' + e.message, 'error');
         }
     },
+
+    async credentialsFlow(uid, userId, devicesEncoded, password, cardNumber) {
+        try {
+            const devices = JSON.parse(decodeURIComponent(atob(devicesEncoded)));
+            const devId = await this.promptDeviceSelection('Select Device for Credentials:', devices);
+            if (devId) {
+                document.getElementById('cred-uid').value = uid;
+                document.getElementById('cred-userid').value = userId;
+                document.getElementById('cred-devid').value = devId;
+                document.getElementById('cred-password').value = password || '';
+                document.getElementById('cred-card').value = cardNumber || '';
+                document.getElementById('credentials-modal').classList.add('active');
+            }
+        } catch (e) {
+            this.showNotification('Error: ' + e.message, 'error');
+        }
+    },
+
+    async saveCredentials() {
+        const uid = document.getElementById('cred-uid').value;
+        const userId = document.getElementById('cred-userid').value;
+        const devId = document.getElementById('cred-devid').value;
+        const password = document.getElementById('cred-password').value;
+        const cardNumber = document.getElementById('cred-card').value;
+        
+        if (!userId || !devId) return;
+        
+        try {
+            const dev = this.devices.find(d => d.id == devId);
+            if (!dev) throw new Error('Device not found');
+            
+            this.showNotification('Saving credentials...', 'info');
+            
+            // Re-use the existing update-user IPC handler which already supports updating password/card
+            // We need to fetch the existing user data to not overwrite name/privilege with empty values
+            const users = await window.electronAPI.invoke('get-local-users');
+            const currentUser = users.find(u => u.uid == uid);
+            
+            if (!currentUser) throw new Error('User not found in local DB');
+            
+            const res = await window.electronAPI.invoke('update-user', {
+                ip: dev.ip,
+                ports: [dev.port1, dev.port2],
+                uid: currentUser.uid,
+                userId: currentUser.user_id,
+                name: currentUser.name || '',
+                role: currentUser.role || currentUser.privilege || 0,
+                work_pattern_id: currentUser.work_pattern_id,
+                deviceId: dev.id,
+                password: password,
+                card_number: cardNumber
+            });
+            
+            if (res.success) {
+                this.showNotification('Credentials updated successfully', 'success');
+                document.getElementById('credentials-modal').classList.remove('active');
+                this.loadUsers();
+            } else {
+                this.showNotification('Failed: ' + res.error, 'error');
+            }
+        } catch (e) {
+            this.showNotification('Error: ' + e.message, 'error');
+        }
+    },
     
     async deleteFingerDirectFlow(uid, userId, fingerIndex, devicesEncoded) {
         try {
@@ -740,6 +814,35 @@ const app = {
             const res = await window.electronAPI.invoke('delete-user-face', { ip: dev.ip, ports: [dev.port1, dev.port2], uid, userId, deviceId: dev.id });
             if (res.success) {
                 this.showNotification(`Face deleted`);
+                this.loadUsers();
+            } else {
+                this.showNotification('Failed: ' + res.error, 'error');
+            }
+        }
+    },
+    async deleteUserPicFlow(uid, userId, devicesEncoded) {
+        try {
+            const devices = JSON.parse(decodeURIComponent(atob(devicesEncoded)));
+            const devId = await this.promptDeviceSelection('Select Device to Delete Profile Photo From:', devices);
+            if (devId) {
+                this.deleteUserPic(uid, userId, devId);
+            }
+        } catch (e) {
+            this.showNotification('Error: ' + e.message, 'error');
+        }
+    },
+
+    async deleteUserPic(uid, userId, devId) {
+        if (!confirm(`Are you sure you want to delete the profile photo for user ${userId}?`)) {
+            return;
+        }
+
+        const dev = this.devices.find(d => d.id == devId);
+        if (dev) {
+            this.showNotification(`Deleting profile photo...`, 'info');
+            const res = await window.electronAPI.invoke('delete-user-pic', { ip: dev.ip, deviceId: dev.id, userId });
+            if (res.success) {
+                this.showNotification(`Profile photo deleted`);
                 this.loadUsers();
             } else {
                 this.showNotification('Failed: ' + res.error, 'error');
@@ -2736,6 +2839,14 @@ const app = {
     async uploadWebcamPhoto() {
         if (!this.currentWebcamBase64 || !this.currentWebcamUserId || !this.currentWebcamDevices) return;
         
+        const uploadAsProfile = document.getElementById('upload-as-profile').checked;
+        const uploadAsFace = document.getElementById('upload-as-face').checked;
+
+        if (!uploadAsProfile && !uploadAsFace) {
+            this.showNotification('Please select at least one option (Profile or Biometric)', 'warning');
+            return;
+        }
+
         document.getElementById('webcam-status').innerText = 'Uploading to devices...';
         document.getElementById('btn-webcam-upload').disabled = true;
 
@@ -2745,7 +2856,9 @@ const app = {
                     ip: dev.ip, 
                     deviceId: dev.id, 
                     userId: this.currentWebcamUserId, 
-                    photoBase64: this.currentWebcamBase64 
+                    photoBase64: this.currentWebcamBase64,
+                    uploadAsProfile: uploadAsProfile,
+                    uploadAsFace: uploadAsFace
                 });
             }
             this.showNotification('Photo uploaded to devices successfully!', 'success');
