@@ -347,6 +347,10 @@ input, select, textarea {
 
 input:focus { border-color: var(--accent-primary); background: rgba(0,0,0,0.3); }
 
+input::placeholder, textarea::placeholder {
+    color: rgba(255, 255, 255, 0.4);
+}
+
 /* Modal */
 .modal {
     position: fixed;
