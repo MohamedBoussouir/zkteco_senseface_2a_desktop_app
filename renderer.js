@@ -65,10 +65,15 @@ const app = {
                 const end = document.getElementById('shift-end').value;
                 
                 this.showNotification('Creating shift...', 'info');
-                const res = await window.electronAPI.invoke('add-shift', { name, start_time: start, end_time: end });
+                const res = await window.electronAPI.invoke('add-shift', { id: this.editingShiftId, name, start_time: start, end_time: end });
                 if (res.success) {
-                    this.showNotification('Shift created successfully');
+                    this.showNotification(this.editingShiftId ? 'Shift updated successfully' : 'Shift created successfully');
                     document.getElementById('add-shift-form').reset();
+                    
+                    this.editingShiftId = null;
+                    const submitBtn = document.querySelector('#add-shift-form button[type="submit"]');
+                    if (submitBtn) submitBtn.innerHTML = '<i class="fas fa-plus"></i> Save Shift';
+                    
                     await this.loadShifts();
                     await this.loadWorkPatterns(); // re-render pattern shift dropdowns
                     await this.renderDailyScheduler();
@@ -108,6 +113,14 @@ const app = {
         window.electronAPI.on('sync-progress', (msg) => {
             this.showNotification(msg, 'success');
             
+            if (msg === 'Smart Sync Complete' || msg.includes('Users synced')) {
+                const btn = document.getElementById('sync-all-users-btn');
+                if (btn && btn.disabled) {
+                    btn.disabled = false;
+                    btn.innerHTML = btn.dataset.oldHtml || '<i class="fas fa-download"></i> Fetch All';
+                }
+            }
+
             if (msg === 'Fingerprint enrolled successfully') {
                 // Auto-fetch fingerprints from the device to update the UI
                 this.syncAllBio();
@@ -139,14 +152,26 @@ const app = {
 
         const syncAllBtn = document.getElementById('sync-all-btn');
         if (syncAllBtn) {
+            let syncFallbackTimeout;
+            
+            window.electronAPI.on('sync-completed', (cmd) => {
+                if (syncAllBtn.disabled) {
+                    syncAllBtn.disabled = false;
+                    syncAllBtn.innerHTML = this.oldSyncBtnHtml || '<i class="fas fa-sync-alt"></i> Sync All Devices';
+                    clearTimeout(syncFallbackTimeout);
+                    this.showNotification('Device completed sync task', 'success');
+                }
+            });
             syncAllBtn.onclick = async (e) => {
                 e.preventDefault();
                 if (this.devices.length === 0) {
                     this.showNotification('No connected devices to sync!', 'error');
                     return;
                 }
+                if (syncAllBtn.disabled) return;
+                
                 syncAllBtn.disabled = true;
-                const oldHtml = syncAllBtn.innerHTML;
+                this.oldSyncBtnHtml = syncAllBtn.innerHTML;
                 syncAllBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Syncing...';
 
                 try {
@@ -160,10 +185,19 @@ const app = {
                     if (activePage === 'users') this.loadUsers();
                 } catch (err) {
                     console.error(err);
-                } finally {
                     syncAllBtn.disabled = false;
-                    syncAllBtn.innerHTML = oldHtml;
+                    syncAllBtn.innerHTML = this.oldSyncBtnHtml;
                 }
+                
+                // Fallback timeout in case device never responds (30 seconds)
+                clearTimeout(syncFallbackTimeout);
+                syncFallbackTimeout = setTimeout(() => {
+                    if (syncAllBtn.disabled) {
+                        syncAllBtn.disabled = false;
+                        syncAllBtn.innerHTML = this.oldSyncBtnHtml || '<i class="fas fa-sync-alt"></i> Sync All Devices';
+                        this.showNotification('Sync timeout (Device might be offline)', 'warning');
+                    }
+                }, 30000);
             };
         }
 
@@ -578,24 +612,63 @@ const app = {
 
     async syncAllUsers() {
         this.showNotification('Fetching all users from devices...', 'info');
-        for (const dev of this.devices) {
-            await window.electronAPI.invoke('sync-users-from-device', { ip: dev.ip, ports: [dev.port1, dev.port2], deviceId: dev.id });
+        const btn = document.getElementById('sync-all-users-btn');
+        let oldHtml = '';
+        if (btn) {
+            btn.disabled = true;
+            oldHtml = btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Fetching...';
+            btn.dataset.oldHtml = oldHtml;
+            // Auto re-enable after 15 seconds in case device is offline or sync event is missed
+            setTimeout(() => {
+                if (btn && btn.disabled) {
+                    btn.disabled = false;
+                    btn.innerHTML = oldHtml;
+                }
+            }, 15000);
         }
-        this.loadUsers();
-        this.showNotification('Users updated from all devices');
+        try {
+            for (const dev of this.devices) {
+                await window.electronAPI.invoke('sync-users-from-device', { ip: dev.ip, ports: [dev.port1, dev.port2], deviceId: dev.id });
+            }
+        } catch (err) {
+            console.error(err);
+            this.showNotification('Error syncing users', 'error');
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = oldHtml;
+            }
+        }
     },
 
     async syncAllBio() {
         this.showNotification('Syncing fingerprints from devices...', 'info');
-        const users = await window.electronAPI.invoke('get-local-users');
-        for (const dev of this.devices) {
-            const devUsers = users.filter(u => u.assigned_devices && u.assigned_devices.some(d => d.id == dev.id));
-            if (devUsers.length > 0) {
-                await window.electronAPI.invoke('get-users-fingerprints', { ip: dev.ip, ports: [dev.port1, dev.port2], users: devUsers, deviceId: dev.id });
+        const btn = document.getElementById('sync-all-bio-btn');
+        let oldHtml = '';
+        if (btn) {
+            btn.disabled = true;
+            oldHtml = btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Syncing...';
+        }
+        try {
+            const users = await window.electronAPI.invoke('get-local-users');
+            for (const dev of this.devices) {
+                const devUsers = users.filter(u => u.assigned_devices && u.assigned_devices.some(d => d.id == dev.id));
+                if (devUsers.length > 0) {
+                    await window.electronAPI.invoke('get-users-fingerprints', { ip: dev.ip, ports: [dev.port1, dev.port2], users: devUsers, deviceId: dev.id });
+                }
+            }
+            this.loadUsers();
+            this.showNotification('Fingerprints synchronized');
+        } catch (err) {
+            console.error(err);
+            this.showNotification('Error syncing fingerprints', 'error');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = oldHtml;
             }
         }
-        this.loadUsers();
-        this.showNotification('Fingerprints synchronized');
     },
 
     async syncAllLogsOnly() {
@@ -1173,9 +1246,17 @@ const app = {
             }
         };
 
-        tbody.innerHTML = logs.slice(0, 100).map(l => `
+        tbody.innerHTML = logs.slice(0, 100).map(l => {
+            let realName = l.user_name;
+            if (!realName || realName === 'Unknown (ADMS)' || realName === 'Unknown') {
+                const user = this.usersData.find(u => u.user_id == l.user_id || u.uid == l.user_id || u.uid == l.uid);
+                if (user && user.name) {
+                    realName = user.name;
+                }
+            }
+            return `
             <tr class="hover:bg-slate-800/30">
-                <td class="p-3 border-b border-slate-700 font-medium">${l.user_name}</td>
+                <td class="p-3 border-b border-slate-700 font-medium">${realName}</td>
                 <td class="p-3 border-b border-slate-700 text-slate-400">${l.user_id}</td>
                 <td class="p-3 border-b border-slate-700">${new Date(l.timestamp).toLocaleString()}</td>
                 <td class="p-3 border-b border-slate-700">
@@ -1187,7 +1268,7 @@ const app = {
                     </button>
                 </td>
             </tr>
-        `).join('');
+        `}).join('');
 
         this.renderLogPagination(totalCount);
     },
@@ -2684,14 +2765,21 @@ const app = {
                     listContainer.innerHTML = '<p class="text-xs text-slate-500 italic text-center p-3">No shifts defined. Add one above.</p>';
                 } else {
                     listContainer.innerHTML = this.shifts.map(s => `
-                        <div class="flex justify-between items-center bg-slate-800/40 p-2 rounded-lg border border-slate-700/50">
-                            <div>
-                                <span class="font-medium text-sm text-slate-200">${s.name}</span>
-                                <div class="text-xs text-slate-400 font-mono">${s.start_time} - ${s.end_time}</div>
+                        <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 12px; border: 1px solid var(--glass-border); display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                            <div style="display: flex; flex-direction: column; gap: 4px;">
+                                <span style="font-weight: 600; font-size: 1.05rem; color: var(--accent-primary);">${s.name}</span>
+                                <span style="font-family: monospace; color: var(--text-muted); font-size: 0.9rem;">
+                                    <i class="far fa-clock" style="margin-right: 4px;"></i>${s.start_time} - ${s.end_time}
+                                </span>
                             </div>
-                            <button class="btn btn-xs btn-red" onclick="app.deleteShift(${s.id})" title="Delete Shift" style="padding: 4px 8px; border-radius: 6px;">
-                                <i class="fas fa-trash-alt"></i>
-                            </button>
+                            <div style="display: flex; gap: 5px;">
+                                <button class="btn btn-icon btn-blue btn-xs" onclick="app.editShift(${s.id})" title="Edit Shift">
+                                    <i class="fas fa-edit"></i>
+                                </button>
+                                <button class="btn btn-icon btn-red btn-xs" onclick="app.deleteShift(${s.id})" title="Delete Shift">
+                                    <i class="fas fa-trash-alt"></i>
+                                </button>
+                            </div>
                         </div>
                     `).join('');
                 }
@@ -2928,6 +3016,21 @@ const app = {
         this.currentWebcamDevices = null;
     },
 
+    editShift(id) {
+        const s = this.shifts.find(x => x.id === id);
+        if (!s) return;
+        
+        this.editingShiftId = id;
+        document.getElementById('shift-name').value = s.name;
+        document.getElementById('shift-start').value = s.start_time;
+        document.getElementById('shift-end').value = s.end_time;
+        
+        const submitBtn = document.querySelector('#add-shift-form button[type="submit"]');
+        if (submitBtn) submitBtn.innerHTML = '<i class="fas fa-save"></i> Update Shift';
+        
+        document.getElementById('add-shift-form').scrollIntoView({ behavior: 'smooth' });
+    },
+
     async deleteShift(id) {
         if (!confirm('Are you sure you want to delete this shift? This will clear schedules using it.')) return;
         this.showNotification('Deleting shift...', 'info');
@@ -2965,26 +3068,31 @@ const app = {
         container.innerHTML = this.workPatterns.map(p => {
             const daysHtml = daysNames.map((name, idx) => {
                 const pd = p.days.find(d => d.day_of_week === idx);
-                let shiftDisplay = 'Off Day';
+                let shiftDisplay = '<span style="color: rgba(255,255,255,0.3); font-style: italic;">Off Day</span>';
                 if (pd && pd.shift_id) {
                     const shift = this.shifts.find(s => s.id === pd.shift_id);
-                    if (shift) shiftDisplay = `${shift.name} (${shift.start_time}-${shift.end_time})`;
+                    if (shift) shiftDisplay = `<span style="background: rgba(52, 211, 153, 0.1); color: #34d399; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; border: 1px solid rgba(52, 211, 153, 0.2);">${shift.name} (${shift.start_time}-${shift.end_time})</span>`;
                 }
-                return `<div class="text-xs text-slate-300 flex justify-between border-b border-slate-700/50 py-1 last:border-0">
-                    <span class="font-medium w-20">${name}:</span> 
-                    <span class="text-emerald-400 text-right truncate pl-2">${shiftDisplay}</span>
+                return `<div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.05); padding: 6px 0; font-size: 0.85rem;">
+                    <span style="color: var(--text-muted); width: 80px;">${name}</span> 
+                    <div style="text-align: right;">${shiftDisplay}</div>
                 </div>`;
             }).join('');
 
             return `
-                <div class="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50 flex flex-col gap-3">
-                    <div class="flex justify-between items-center border-b border-slate-700 pb-2">
-                        <span class="font-medium text-emerald-400">${p.name}</span>
-                        <button class="btn btn-xs btn-red" onclick="app.deleteWorkPattern(${p.id})" title="Delete Pattern" style="padding: 4px 8px; border-radius: 6px;">
-                            <i class="fas fa-trash-alt"></i>
-                        </button>
+                <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 12px; border: 1px solid var(--glass-border); display: flex; flex-direction: column; gap: 10px; margin-bottom: 15px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--glass-border); padding-bottom: 10px;">
+                        <span style="font-weight: 600; font-size: 1.05rem; color: var(--accent-primary);">${p.name}</span>
+                        <div style="display: flex; gap: 5px;">
+                            <button class="btn btn-icon btn-blue btn-xs" onclick="app.editWorkPattern(${p.id})" title="Edit Pattern">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button class="btn btn-icon btn-red btn-xs" onclick="app.deleteWorkPattern(${p.id})" title="Delete Pattern">
+                                <i class="fas fa-trash-alt"></i>
+                            </button>
+                        </div>
                     </div>
-                    <div class="flex flex-col">
+                    <div style="display: flex; flex-direction: column;">
                         ${daysHtml}
                     </div>
                 </div>
@@ -3032,19 +3140,42 @@ const app = {
             });
         }
 
-        this.showNotification('Saving Work Pattern...', 'info');
-        const res = await window.electronAPI.invoke('save-work-pattern', { name, days });
+        this.showNotification(this.editingWorkPatternId ? 'Updating Work Pattern...' : 'Saving Work Pattern...', 'info');
+        const res = await window.electronAPI.invoke('save-work-pattern', { id: this.editingWorkPatternId, name, days });
         if (res.success) {
-            this.showNotification('Pattern saved successfully', 'success');
+            this.showNotification(this.editingWorkPatternId ? 'Pattern updated successfully' : 'Pattern saved successfully', 'success');
             document.getElementById('add-pattern-form').reset();
             // Default select to 'off'
             for (let i = 0; i < 7; i++) {
                 document.getElementById(`pattern-day-${i}`).value = 'off';
             }
+            
+            this.editingWorkPatternId = null;
+            const submitBtn = document.querySelector('#add-pattern-form button[type="submit"]');
+            if (submitBtn) submitBtn.innerHTML = '<i class="fas fa-plus"></i> Save Pattern';
+            
             await this.loadWorkPatterns();
         } else {
             this.showNotification('Failed to save pattern', 'error');
         }
+    },
+    
+    editWorkPattern(id) {
+        const p = this.workPatterns.find(x => x.id === id);
+        if (!p) return;
+        
+        this.editingWorkPatternId = id;
+        document.getElementById('pattern-name').value = p.name;
+        
+        for (let i = 0; i < 7; i++) {
+            const pd = p.days.find(d => d.day_of_week === i);
+            document.getElementById(`pattern-day-${i}`).value = (pd && pd.shift_id) ? pd.shift_id : 'off';
+        }
+        
+        const submitBtn = document.querySelector('#add-pattern-form button[type="submit"]');
+        if (submitBtn) submitBtn.innerHTML = '<i class="fas fa-save"></i> Update Pattern';
+        
+        document.getElementById('add-pattern-form').scrollIntoView({ behavior: 'smooth' });
     },
 
     async deleteWorkPattern(id) {

@@ -220,8 +220,8 @@
                             <i class="fas fa-search" style="position: absolute; left: 15px; top: 50%; transform: translateY(-50%); color: var(--text-muted); font-size: 0.9rem;"></i>
                             <input type="text" id="users-search" placeholder="Search employees..." style="background: rgba(0,0,0,0.2); color: var(--text-main); border: 1px solid var(--glass-border); padding: 10px 15px 10px 40px; border-radius: 12px; font-size: 0.9rem; width: 100%; outline: none; transition: border-color 0.3s;" onfocus="this.style.borderColor='var(--accent-primary)'" onblur="this.style.borderColor='var(--glass-border)'" oninput="app.handleUsersSearch(this.value)">
                         </div>
-                        <button class="btn btn-secondary" onclick="app.syncAllUsers()"><i class="fas fa-download"></i> Fetch All</button>
-                        <button class="btn btn-secondary" onclick="app.syncAllBio()"><i class="fas fa-fingerprint"></i> Sync Bio</button>
+                        <button class="btn btn-secondary" id="sync-all-users-btn" onclick="app.syncAllUsers()"><i class="fas fa-download"></i> Fetch All</button>
+                        <button class="btn btn-secondary" id="sync-all-bio-btn" onclick="app.syncAllBio()"><i class="fas fa-fingerprint"></i> Sync Bio</button>
                     </div>
                 </div>
                 <div class="table-container">

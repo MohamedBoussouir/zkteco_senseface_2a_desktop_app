@@ -101,6 +101,9 @@ function startAdmsServer(port = 80, mainWindow = null) {
                         const originalCmd = cmdHistory.get(id);
                         if (originalCmd) {
                             console.log(`[ADMS] Exact Command Completed: ${originalCmd}`);
+                            if (mainWindow) {
+                                mainWindow.webContents.send('sync-completed', originalCmd);
+                            }
                             try {
                                 const dev = await db('devices').where('sn', query.SN).first();
                                 if (dev) {

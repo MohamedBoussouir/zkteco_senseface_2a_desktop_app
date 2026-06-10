@@ -922,8 +922,15 @@ function setupIpcHandlers(mainWindow) {
     });
 
     ipcMain.handle('add-shift', async (event, shift) => {
-        const [id] = await db('shifts').insert(shift);
-        return { success: true, id };
+        if (shift.id) {
+            const id = shift.id;
+            delete shift.id;
+            await db('shifts').where('id', id).update(shift);
+            return { success: true, id };
+        } else {
+            const [id] = await db('shifts').insert(shift);
+            return { success: true, id };
+        }
     });
 
     ipcMain.handle('delete-shift', async (event, id) => {
