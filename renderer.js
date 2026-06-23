@@ -2097,6 +2097,143 @@ const app = {
         }
     },
 
+    exportLateReportToExcel() {
+        if (!this.currentFilteredReport || this.currentFilteredReport.length === 0) {
+            this.showNotification('No data to export', 'warning');
+            return;
+        }
+
+        const mode = document.getElementById('report-mode') ? document.getElementById('report-mode').value : 'day';
+        const trans = this.translations[this.currentLang || 'en'] || this.translations.en;
+        let exportData = [];
+
+        if (mode === 'day') {
+            exportData = this.currentFilteredReport.map(r => ({
+                [trans.col_name || 'Name']: r.name,
+                [trans.col_emp_id || 'Employee ID']: r.user_id,
+                [trans.col_first_punch || 'First Punch']: r.first,
+                [trans.col_last_punch || 'Last Punch']: r.last,
+                ['Expected Time']: r.expected || (document.getElementById('report-start-time') ? document.getElementById('report-start-time').value : ''),
+                [trans.col_delay || 'Delay']: r.delay,
+                [trans.work_hrs || 'Worked Hours']: r.worked,
+                [trans.col_status || 'Status']: r.status
+            }));
+        } else {
+            this.currentFilteredReport.forEach(r => {
+                if (r.dailyDetails) {
+                    r.dailyDetails.forEach(d => {
+                        exportData.push({
+                            [trans.col_name || 'Name']: r.name,
+                            [trans.col_emp_id || 'Employee ID']: r.user_id,
+                            [trans.date_label || 'Date']: d.date,
+                            [trans.col_first_punch || 'First Punch']: d.first,
+                            [trans.col_last_punch || 'Last Punch']: d.last,
+                            [trans.col_delay || 'Delay']: d.delay,
+                            [trans.work_hrs || 'Worked Hours']: d.worked,
+                            [trans.col_status || 'Status']: d.status
+                        });
+                    });
+                }
+            });
+        }
+
+        const worksheet = XLSX.utils.json_to_sheet(exportData);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "Late Report");
+        XLSX.writeFile(workbook, `Late_Report_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    },
+
+    exportLateReportToPDF() {
+        if (!this.currentFilteredReport || this.currentFilteredReport.length === 0) {
+            this.showNotification('No data to export', 'warning');
+            return;
+        }
+
+        const container = document.createElement('div');
+        container.style.padding = '20px';
+        container.style.backgroundColor = '#fff';
+        container.style.color = '#000';
+        
+        const title = document.createElement('h2');
+        title.innerText = 'Attendance Report';
+        title.style.textAlign = 'center';
+        container.appendChild(title);
+
+        const table = document.createElement('table');
+        table.style.width = '100%';
+        table.style.borderCollapse = 'collapse';
+        table.style.fontSize = '12px';
+        table.border = '1';
+
+        const mode = document.getElementById('report-mode') ? document.getElementById('report-mode').value : 'day';
+        const trans = this.translations[this.currentLang || 'en'] || this.translations.en;
+        
+        const thead = document.createElement('thead');
+        thead.innerHTML = `
+            <tr>
+                <th style="padding: 5px; text-align: left;">${trans.col_name || 'Name'}</th>
+                <th style="padding: 5px; text-align: left;">${trans.col_emp_id || 'ID'}</th>
+                ${mode !== 'day' ? `<th style="padding: 5px; text-align: left;">${trans.date_label || 'Date'}</th>` : ''}
+                <th style="padding: 5px; text-align: left;">${trans.col_first_punch || 'First Punch'}</th>
+                <th style="padding: 5px; text-align: left;">${trans.col_last_punch || 'Last Punch'}</th>
+                <th style="padding: 5px; text-align: left;">${trans.col_delay || 'Delay'}</th>
+                <th style="padding: 5px; text-align: left;">${trans.work_hrs || 'Worked Hrs'}</th>
+                <th style="padding: 5px; text-align: left;">${trans.col_status || 'Status'}</th>
+            </tr>
+        `;
+        table.appendChild(thead);
+
+        const tbody = document.createElement('tbody');
+        
+        if (mode === 'day') {
+            this.currentFilteredReport.forEach(r => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td style="padding: 5px;">${r.name}</td>
+                    <td style="padding: 5px;">${r.user_id}</td>
+                    <td style="padding: 5px;">${r.first}</td>
+                    <td style="padding: 5px;">${r.last}</td>
+                    <td style="padding: 5px;">${r.delay}</td>
+                    <td style="padding: 5px;">${r.worked}</td>
+                    <td style="padding: 5px;">${r.status}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        } else {
+            this.currentFilteredReport.forEach(r => {
+                if (r.dailyDetails) {
+                    r.dailyDetails.forEach(d => {
+                        const tr = document.createElement('tr');
+                        tr.innerHTML = `
+                            <td style="padding: 5px;">${r.name}</td>
+                            <td style="padding: 5px;">${r.user_id}</td>
+                            <td style="padding: 5px;">${d.date}</td>
+                            <td style="padding: 5px;">${d.first}</td>
+                            <td style="padding: 5px;">${d.last}</td>
+                            <td style="padding: 5px;">${d.delay}</td>
+                            <td style="padding: 5px;">${d.worked}</td>
+                            <td style="padding: 5px;">${d.status}</td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+                }
+            });
+        }
+        
+        table.appendChild(tbody);
+        container.appendChild(table);
+
+        const opt = {
+            margin:       0.5,
+            filename:     `Late_Report_${new Date().toISOString().slice(0, 10)}.pdf`,
+            image:        { type: 'jpeg', quality: 0.98 },
+            html2canvas:  { scale: 2 },
+            jsPDF:        { unit: 'in', format: 'letter', orientation: 'landscape' }
+        };
+
+        html2pdf().set(opt).from(container).save();
+    },
+
     translations: {
         en: {
             dashboard: "Dashboard",

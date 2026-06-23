@@ -7,6 +7,8 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 </head>
 <body>
 
@@ -639,6 +641,12 @@
                 <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
                     <h2 id="report-table-title"><i class="fas fa-list-alt"></i> Attendance Summary</h2>
                     <div style="display: flex; gap: 10px; align-items: center;">
+                        <button class="btn btn-secondary" onclick="app.exportLateReportToExcel()" style="padding: 8px 12px; font-size: 0.85rem;" title="Export to Excel">
+                            <i class="fas fa-file-excel" style="color: #28a745;"></i> Excel
+                        </button>
+                        <button class="btn btn-secondary" onclick="app.exportLateReportToPDF()" style="padding: 8px 12px; font-size: 0.85rem;" title="Export to PDF">
+                            <i class="fas fa-file-pdf" style="color: #dc3545;"></i> PDF
+                        </button>
                         <select id="report-status-filter" onchange="app.filterLateReport()" style="background: var(--bg-slate-900); color: var(--text-main); border: 1px solid var(--border-color); padding: 8px 12px; border-radius: 8px; font-size: 0.85rem; outline: none; cursor: pointer; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--primary-color)'" onblur="this.style.borderColor='var(--border-color)'">
                             <option value="all">All Statuses</option>
                             <option value="Late">Late Only 🔴</option>
